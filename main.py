@@ -18,8 +18,9 @@ from  xarray import open_zarr
 #from rasterio.enums import Resampling
 #from google.cloud import storage
 import numpy as np
+from scipy.spatial import KDTree
 from pyproj import Proj
-from random import random
+# from random import random
 import datashader as DS
 import plotly.graph_objects as go
 #from plotly.supblots import make_subplots
@@ -92,7 +93,7 @@ def read_farm_data(farmfile):
             data[line[0]]= {'additional location':line[1],
                             'Name Scot aqua ': line[2],
                             'Site ID SEPA': line[3],
-                            'Site ID Scot env':line[4],
+                            'Site ID Scot env':str(line[4]),
                             'lat':float(line[6]),'lon':float(line[7]),
                             'Prod year':line[9],
                             'licensed peak biomass':line[10],
@@ -115,22 +116,31 @@ def read_farm_data(farmfile):
                     biom[i]=np.nan
             data[line[0]]['reference biomass']= ref
             data[line[0]]['biomasses']=biom
-            data[line[0]]['lice data']=add_lice_data(line[4])
+            data[line[0]]['lice data'], data[line[0]]['mean lice']=add_lice_data(line[4])       
             if ref==0:
                 # print('NDV in ',line[0]) 
                 id -=1 
                 del data[line[0]]
             
     print('########## BIOMASS DATA READ ###########')
-    return data, times
+    print('########## Making KDe Tree   ###########')
+    Xs= np.array([data[farm]['lon'] for farm in data.keys()])
+    Ys= np.array([data[farm]['lat'] for farm in data.keys()])
+    Ids=np.array([data[farm]['Site ID Scot env'] for farm in data.keys()])
+    # print(Ids)
+    tree = KDTree(np.vstack((Xs,Ys)).T)
+    print('########## Tree Made ############')
+    return data, times, tree, Ids
 
 def add_lice_data(SEPA_ID):
     arr= np.empty(261)
     arr[:]=np.nan
+    av=np.nan
     for licence in lice_data.keys():
         if licence==SEPA_ID:
             arr=lice_data[licence].values
-    return arr
+            av = lice_data[licence].mean()
+    return arr, av
 
 def prepare_zarr():
     # zoom 10 = 38.218 m so if zoom > 9 50m zarr then image is max 512 px
@@ -159,25 +169,62 @@ def select_zoom(zoom):
         r=100
     return r
     
+def search_lice_data(start,end, ident, farm):
+    '''
+    Search if there are data for the farm at the chosen date.
+    Check it is not null
+    return may data if available
+    if not, try to return the average lice value for the farm.
+    '''
+    if len(ident) >0:
+        # print(ident, farm)
+        may_data= lice_data[ident].sel(time=slice(start,end)).mean().values
+        if not np.isnan(may_data):
+            if may_data>0:
+                print(f'found lice data in may for {farm}, {ident}')
+                return may_data
+        else:
+            if np.isnan(farm_data[farm]['mean lice']) is False:
+                print('Using average data for the farm ', farm)
+                return fmay_dataarm_data[farm]['mean lice']
+    else:
+        print(f'No ID for farm {farm}')
+
     
-def fetch_biomass(activated_farms, biomass_factor, year=2004):
+def fetch_biomass(activated_farms, biomass_factor, lice_factor, year=2004):
     '''
     Identify the biomass data for the month of may of the chosen year
     scale the data according to data
     remove farm with no data for the month
+    try to populate the lice density for each farm
     may 2003 has no data and generate error
     '''
-    filters=np.where(np.logical_and(times>datetime(year=year, month=4,day=30) , times<datetime(year=year, month=6,day=1)))[0]
-    #print('year: ', year, ' , filters: ', filters)
+    n= 50 #nb of nearest farms
+    start, end = datetime(year=year, month=4,day=30), datetime(year=year, month=6,day=1)
+    filters=np.where(np.logical_and(times> start, times<end))[0]
     filtered=times[filters]
-    for farm in farm_data.keys():
+    for farm in farm_data.keys():       
         extract=farm_data[farm]['biomasses'][filters].mean()
         if np.isnan(extract):
             activated_farms[farm_data[farm]['ID']]= False
+            print(f'{farm} is not stocked')
         else:
             biomass_factor[farm_data[farm]['ID']]=extract/farm_data[farm]['reference biomass']
+            local_data=search_lice_data(start,end, farm_data[farm]['Site ID Scot env'], farm)
+            if local_data is not None :
+                lice_factor[farm_data[farm]['ID']]=local_data
+            else:
+                # print('searching nearby farms')
+                seek= tree.query(np.array([farm_data[farm]['lon'], farm_data[farm]['lat']]).T, n)[1]
+                for i in range(n):
+                    remote_data= search_lice_data(start,end, Ids[i], farm)
+                    if remote_data is not None :
+                        lice_factor[farm_data[farm]['ID']]=remote_data
+                        print(f'Used data from {Ids[i]} to populate {farm}')
+                        break
+                
     # print(biomass_factor)
-    return activated_farms, biomass_factor
+    return activated_farms, biomass_factor, lice_factor
 
         
 #####################TAB 1 ###########################
@@ -270,6 +317,14 @@ def tuning_card():
                         scale={'start':0, 'labelInterval':10,'interval':0.05},
                         color='#f89406'
                         )
+                    ]),
+                dbc.Col([
+                    daq.BooleanSwitch(
+                         id='lice_meas_toggle',
+                         label='Use reported lice where possible',
+                         on=False
+                         ),
+                    html.P("Very little data are available on lice infestation until very recently. The algorythm will try first to find if there are data in the May season you selected. If there isn't it will try to make an average of recorded lice for the farm. If the farm never reported lice counts then it will use the nearest farm that has data.")
                     ]),
                 ])
             ])
@@ -490,6 +545,13 @@ def mk_farm_evo(name, times):
         name='modelled lice infestation',
         yref='y2'
         )
+    if not np.isnan(farm_data[name]['mean lice']):
+        fig_p.add_shape(type='line', xref='paper', 
+            x0=0, y0=float(farm_data[name]['mean lice']), x1=1, y1=float(farm_data[name]['mean lice']),
+            line=dict(color='firebrick', dash='dash'),
+            name='Average lice infestation',
+            yref='y2'
+            )   
     for y in range(2003,2022):
         fig_p.add_vline(x=datetime(year=y, month=5, day=1), line=dict(color='green', dash='dash'))
     fig_p.update_layout(
@@ -501,10 +563,10 @@ def mk_farm_evo(name, times):
                      showgrid=False ),
         margin=dict(b=15, l=15, r=5, t=5),
     )
-    print(fig_p['layout']['shapes'][0])
+    # print(fig_p['layout']['shapes'][0])
     return fig_p
     
-def mk_farm_layout(name, marks_biomass,marks_lice):
+def togglingyears():
     p='Production year '
     if farm_data[name]['Prod year'] == 'ODD':
         p+='odd'
@@ -515,6 +577,8 @@ def mk_farm_layout(name, marks_biomass,marks_lice):
     else:
         p+= farm_data[name]['Prod year']
         s= random() < 0.5,
+    
+def mk_farm_layout(name, marks_biomass,marks_lice):
     farm_lay= [dbc.Col([
     		    dbc.Row(
                 	daq.BooleanSwitch(
@@ -523,14 +587,7 @@ def mk_farm_layout(name, marks_biomass,marks_lice):
                 	    label="Toggle farm on/off",
                 	    labelPosition="top"
                 	    )),
-                    dbc.Row([
-               	        daq.BooleanSwitch(
-              		    id={'type':'year','id':farm_data[name]['ID']},
-              		    on=s, 
-              		    label=p,
-              		    disabled=True,              
-              	   	    ),
-              	         ]),
+
               	     dbc.Row([
               	          html.P('SEPA old ID: ' + farm_data[name]['Site ID SEPA']),
               	          html.P('Scottish Environment ID: ' + farm_data[name]['Site ID Scot env']),
@@ -540,7 +597,7 @@ def mk_farm_layout(name, marks_biomass,marks_lice):
                    ], width=3),
             dbc.Col([
                 html.H3('Modelled Peak Biomass {} tons'.format(farm_data[name]['reference biomass'])),
-                html.H3('First year biomass {} tons'.format(farm_data[name]['reference biomass']/2)),
+                #html.H3('First year biomass {} tons'.format(farm_data[name]['reference biomass']/2)),
                 html.H3('Tune Farm biomass:'),
                 dcc.Slider(
                     id={'type':'biomass_slider','id':farm_data[name]['ID']},
@@ -549,7 +606,7 @@ def mk_farm_layout(name, marks_biomass,marks_lice):
                     value=1,
                     included=False,
                     tooltip={"placement": "bottom"},
-                    disabled=False
+                    disabled=True,
                     ),
                 html.H3('Tune lice infestation:'),
                 html.P('Unit is lice/fish'),
@@ -560,7 +617,7 @@ def mk_farm_layout(name, marks_biomass,marks_lice):
                     value=0.5,
                     included=False,
                     tooltip={"placement": "bottom"},
-                    disabled=False,
+                    disabled=True,
                     )],
             width=8)]
     return farm_lay
@@ -684,9 +741,18 @@ if 'All_names' not in globals():
 if 'lice_data' not in globals():
     liceStore='data/consolidated_sealice_data_2017-2021.zarr'
     lice_data=open_zarr(liceStore)
+    ### mess in raw data
+    id_c=250
+    typos =['Fs0860', 'Fs1018', 'Fs1024']
+    correct=['FS0860', 'FS1018', 'FS1024']
+    for mess, ok in zip(typos, correct):
+        lice_data[ok].values[id_c]=lice_data[mess].values[id_c]
+        lice_data=lice_data.drop(mess)
+    
+    
 if 'farm_data' not in globals():
     csvfile='data/biomasses.csv'
-    farm_data, times =read_farm_data(csvfile)
+    farm_data, times, tree, Ids =read_farm_data(csvfile)
     print('Farm loaded')
     
     ############### TO BE CONTINUED ##################
@@ -851,15 +917,16 @@ def redraw( toggle,  power, relay,year, biomC, liceC, state_power, egg, idx,  sp
     carto_style= carto_style1 if toggle else carto_style2
     activated_farms= np.ones(len(All_names), dtype='bool')
     biomass_factor=np.ones(len(All_names))
-    lice_factor=np.ones(len(All_names))
+    lice_factor=np.ones(len(All_names))/2
     if biomC ==0:
         biomC=0.00001
     if liceC==0:
         liceC=0.00001
     biomC /=100
     liceC *=2
-    
-    idx, biomass_factor=fetch_biomass(activated_farms, biomass_factor, year)
+    print('preparing lice factor')
+    idx, biomass_factor, lice_factor=fetch_biomass(activated_farms, biomass_factor, lice_factor, year)
+    print('lice factor', lice_factor)
     name_list=np.array(list(farm_data.keys()))[idx] #[computed_farms]
     current_biomass=[farm_data[farm]['reference biomass']*
                                            biomass_factor[farm_data[farm]['ID']] *biomC
@@ -933,7 +1000,10 @@ def redraw( toggle,  power, relay,year, biomC, liceC, state_power, egg, idx,  sp
 
             fig['layout']['mapbox']['layers']=[]
         relayed_zoom= zoom
-    return fig, None, sum(current_biomass)*1000, int(sum(current_biomass)*4.5*c_lice*1000*liceC)
+    print(current_biomass)
+    print(liceC)
+    alllice=666 #(current_biomass*lice_factor).sum()*4.5*1000*c_lice
+    return fig, None, sum(current_biomass)*1000, int(alllice)
 
 
 @app.callback([
