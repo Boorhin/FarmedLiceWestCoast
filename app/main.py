@@ -563,7 +563,7 @@ def mk_farm_layout(name, marks_biomass,marks_lice):
                    ], width=3),
             dbc.Col([
                 html.H3('Modelled Peak Biomass {} tons'.format(farm_data[name]['reference biomass'])),
-                html.H3('Average lice per fish {}'.format(round(farm_data[name]['mean lice'],2))),
+                html.H3('Average lice per fish {}'.format(np.round(farm_data[name]['mean lice'],2))),
                 html.H3('Tune Farm biomass:'),
                 dcc.Slider(
                     id={'type':'biomass_slider','id':farm_data[name]['ID']},
@@ -698,11 +698,13 @@ p=Proj("epsg:3857", preserve_units=False)
 
 
 ##################### FETCH DATA ###################
+rootdir='/mnt/nfs/home/'
 
 if 'All_names' not in globals():
     print('loading dataset')
+
     master='data/westcoast_map_trim.zarr' #needs to go in the share drive
-    super_ds=open_zarr(master).drop('North Kilbrannan')  
+    super_ds=open_zarr(rootdir+master).drop('North Kilbrannan')  
     All_names=np.array(list(super_ds.keys()))
     ## remove border effects
     super_ds= super_ds.where(super_ds.x<-509600)
@@ -712,7 +714,7 @@ ref_biom=np.zeros(len(All_names))
     
 if 'lice_data' not in globals():
     liceStore='data/consolidated_sealice_data_2017-2021.zarr'
-    lice_data=open_zarr(liceStore)
+    lice_data=open_zarr(rootdir+liceStore)
     ### mess in raw data
     id_c=250
     typos =['Fs0860', 'Fs1018', 'Fs1024']
@@ -724,7 +726,7 @@ if 'lice_data' not in globals():
     
 if 'farm_data' not in globals():
     csvfile='data/biomasses.csv'
-    farm_data, times, tree, Ids =read_farm_data(csvfile)
+    farm_data, times, tree, Ids =read_farm_data(rootdir+csvfile)
     print('Farm loaded')
     
 
@@ -805,7 +807,7 @@ app.layout = dbc.Container([
 def global_store(r):
     pathtods=f'data/map_{r}m.zarr'
     print('using global store ', pathtods)
-    super_ds=open_zarr(pathtods).drop('North Kilbrannan')
+    super_ds=open_zarr(rootdir+pathtods).drop('North Kilbrannan')
     ## remove border effects
     super_ds= super_ds.where(super_ds.x<-509600) 
     
