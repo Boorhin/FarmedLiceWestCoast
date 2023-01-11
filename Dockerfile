@@ -12,11 +12,14 @@ RUN pip install -r /requirements.txt
 COPY ./app ./
 
 #mount the NFS drive
-# RUN mount -t nfs 192.168.3.62:/srv /mnt/nfs/home
+#RUN --mount=type=bind,target=/data,source=192.168.3.62:/srv/data
+
+# expose the right port?
+EXPOSE 8080
 
 # Changing to non-root user
 RUN useradd -m appUser
 USER appUser
 
 # Run locally on port 8080
-CMD gunicorn --bind 0.0.0.0:8080 main:app
+CMD gunicorn --bind 0.0.0.0:8080 main:server

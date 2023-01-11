@@ -95,6 +95,19 @@ def mk_img(ds_host, name_list, span, Coeff,cmp):
     return tf.shade(arr.where(arr>0).load(),
                     cmap=cmp, how='linear',
                     span=span).to_pil()
+def add_new_SEPA_nb(sepafile):
+    '''
+    Add information from new SEPA GSID to modelled farms
+    '''
+    with open(sepafile) as ff:
+       ff.readline()
+       for line in ff:
+           line=line.strip().split(',')
+           try:
+               farm_data[line[0]]['GSID']=line[1]
+           except:
+               print(f'{line[0]} not found in farmdata')
+    return farm_data
 
 def read_farm_data(farmfile):
     data={}
@@ -108,7 +121,7 @@ def read_farm_data(farmfile):
             line=line.strip().split(',')
             #print('Reading data for - ', line[0])
             data[line[0]]= {'additional location':line[1],
-                            'Name Scot aqua ': line[2],
+                            'Name MS': line[2],
                             'Site ID SEPA': line[3],
                             'Site ID Scot env':str(line[4]),
                             'lat':float(line[6]),'lon':float(line[7]),
@@ -555,8 +568,10 @@ def mk_farm_layout(name, marks_biomass,marks_lice):
                 	    )),
 
               	     dbc.Row([
-              	          html.P('SEPA old ID: ' + farm_data[name]['Site ID SEPA']),
-              	          html.P('Scottish Environment ID: ' + farm_data[name]['Site ID Scot env']),
+              	          html.P('Site identification number (GSID): '+farm_data[name]['GSID']),
+              	          html.P('SEPA Reference: ' + farm_data[name]['Site ID SEPA']),
+              	          html.P('Marine Scotland Reference: ' + farm_data[name]['Site ID Scot env']),
+              	          html.P('Marine Scotland site name: ' + farm_data[name]['Name MS']),
               	          #html.P('Production Year: '+ farm_data[name]['Prod year']),
               	          html.P('Operator: ' + farm_data[name]['operator']),
               	          ]),
@@ -564,7 +579,7 @@ def mk_farm_layout(name, marks_biomass,marks_lice):
             dbc.Col([
                 html.H3('Modelled Peak Biomass {} tons'.format(farm_data[name]['reference biomass'])),
                 html.H3('Average lice per fish {}'.format(np.round(farm_data[name]['mean lice'],2))),
-                html.H3('Tune Farm biomass:'),
+                html.H3('Tune Farm biomass: (DESACTIVATED)'),
                 dcc.Slider(
                     id={'type':'biomass_slider','id':farm_data[name]['ID']},
                     step=0.05,
@@ -574,7 +589,7 @@ def mk_farm_layout(name, marks_biomass,marks_lice):
                     tooltip={"placement": "bottom"},
                     disabled=True,
                     ),
-                html.H3('Tune lice infestation:'),
+                html.H3('Tune lice infestation: (DESACTIVATED)'),
                 html.P('Unit is lice/fish'),
                 dcc.Slider(
                     id={'type':'lice_slider','id':farm_data[name]['ID']},
@@ -610,58 +625,6 @@ def tab3_layout(All_names):
     ])
 ])
 
-############# TAB 4 ############################
-
-def mk_accordion_item(data, i, marks_biomass, marks_lice):
-    #data=farm_dic[name]
-    item=dbc.Row([
-            dbc.Col([
-                daq.BooleanSwitch(
-                    id={'type':'switch','id':i},
-                    on=True,
-                    label="Toggle farm on/off",
-                    labelPosition="top"
-                    )],
-                width=3),
-            dbc.Col([
-                html.H3('Modelled Biomass {} tons'.format(data['reference biomass'])),
-                html.H3('Tune Farm biomass:'),
-                dcc.Slider(
-                    id={'type':'biomass_slider','id':i},
-                    step=0.05,
-                    marks=marks_biomass,
-                    value=1,
-                    included=False,
-                    tooltip={"placement": "bottom"},
-                    disabled=False
-                    ),
-                html.H3('Tune lice infestation:'),
-                html.P('Unit is lice/fish'),
-                dcc.Slider(
-                    id={'type':'lice_slider','id':i},
-                    step=0.05,
-                    marks=marks_lice,
-                    value=0.5,
-                    included=False,
-                    tooltip={"placement": "bottom"},
-                    disabled=False,
-                    )],
-            width=8)
-        ], align='center')
-    return item
-
-def tab4_layout(farm_data):
-        return dbc.Card([
-            dbc.CardHeader('Modify individual farm parameters'),
-            dbc.CardBody([
-                dbc.Accordion(
-                    [dbc.AccordionItem([
-                        mk_accordion_item(farm_data[name],i, marks_biomass, marks_lice)],
-                                    title=name) for (i, name) in enumerate(farm_data.keys())],
-                        start_collapsed=True,
-                    )
-                ])
-            ])
 
 
 ############# VARIABLES ##########################33
@@ -698,7 +661,14 @@ p=Proj("epsg:3857", preserve_units=False)
 
 
 ##################### FETCH DATA ###################
-rootdir='/mnt/nfs/home/'
+# test local vs host
+local= '/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app'
+host='/mnt/nfs/home'
+if os.path.exists(local):
+    rootdir=local
+else:
+    rootdir=host
+rootdir+='/'
 
 if 'All_names' not in globals():
     print('loading dataset')
@@ -717,7 +687,7 @@ if 'lice_data' not in globals():
     lice_data=open_zarr(rootdir+liceStore)
     ### mess in raw data
     id_c=250
-    typos =['Fs0860', 'Fs1018', 'Fs1024']
+    typos =['Fs0860', 'Fs1018', 'Fs1024'] #, 'FS1287 '
     correct=['FS0860', 'FS1018', 'FS1024']
     for mess, ok in zip(typos, correct):
         lice_data[ok].values[id_c]=lice_data[mess].values[id_c]
@@ -728,6 +698,8 @@ if 'farm_data' not in globals():
     csvfile='data/biomasses.csv'
     farm_data, times, tree, Ids =read_farm_data(rootdir+csvfile)
     print('Farm loaded')
+    sepacsv= 'data/SEPA_GSID.csv'
+    farm_data=add_new_SEPA_nb(rootdir+sepacsv)
     
 
 ###########  manage themes ###############
@@ -859,6 +831,7 @@ def toggle_egg_models(eggs):
     Input('biomass_knob','value'),
     Input('lice_knob','value'),
     Input('lice_meas_toggle','on'),
+    Input('span-slider','value') ,
     ],
     [  
     State('power_streaming','on'),
@@ -866,13 +839,13 @@ def toggle_egg_models(eggs):
     State({'type':'switch', 'id':ALL},'on'),
     #State({'type':'biomass_slider', 'id':ALL},'value'),
     #State({'type':'lice_slider', 'id':ALL},'value'),
-    State('span-slider','value') ,
+    
     #State('resolution-slider','value'),
     State('heatmap', 'figure'),
     State('progress-curves','figure'),
     ]
 )
-def redraw( toggle,  power, relay,year, biomC, liceC, meas,state_power, egg,  idx,  span, fig, curves): 
+def redraw( toggle,  power, relay,year, biomC, liceC, meas,  span,state_power, egg,  idx, fig, curves): 
     ctx = dash.callback_context
     
     ### toggle themes
@@ -904,6 +877,7 @@ def redraw( toggle,  power, relay,year, biomC, liceC, meas,state_power, egg,  id
     current_biomass=[farm_data[farm]['reference biomass']*
                                            biomass_factor[farm_data[farm]['ID']] *biomC
                                            for farm in name_list]
+    # print(current_biomass)
     fig['data'][1]=go.Scattermapbox(
                                 lat=[farm_data[farm]['lat'] for farm in name_list],
                                 lon=[farm_data[farm]['lon'] for farm in name_list],
@@ -925,10 +899,11 @@ def redraw( toggle,  power, relay,year, biomC, liceC, meas,state_power, egg,  id
     # modify egg model from Rittenhouse (16.9) to Stein (30)
     if egg:
         # lices *= 30/16.9
-        c_lice=30
+        c_lice=30/16.9
     else:
-        c_lice=16.9
-    Coeff=biomC*biomass_factor[idx]*lice_factor[idx]    
+        c_lice=1
+    # set global factor biomass x individual farm biom x individual lice x egg model
+    Coeff=biomC*biomass_factor[idx]*lice_factor[idx]*c_lice    
     
 
     ### update heatmap
@@ -966,7 +941,7 @@ def redraw( toggle,  power, relay,year, biomC, liceC, meas,state_power, egg,  id
             fig['layout']['mapbox']['layers']=[]
         relayed_zoom= zoom
     ## led values
-    alllice=(Coeff*ref_biom[idx]).sum()*c_lice*4.5*1000
+    alllice=(Coeff*ref_biom[idx]).sum()*4.5*1000
     return fig, None, sum(current_biomass)*1000, int(alllice)
 
 
