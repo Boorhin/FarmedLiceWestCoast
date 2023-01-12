@@ -122,8 +122,8 @@ def read_farm_data(farmfile):
             #print('Reading data for - ', line[0])
             data[line[0]]= {'additional location':line[1],
                             'Name MS': line[2],
-                            'Site ID SEPA': line[3],
-                            'Site ID Scot env':str(line[4]),
+                            'Site ID SEPA': line[3].strip(),
+                            'Site ID Scot env':str(line[4]).strip(),
                             'lat':float(line[6]),'lon':float(line[7]),
                             'Prod year':line[9],
                             'licensed peak biomass':line[10],
@@ -216,7 +216,7 @@ def search_lice_data(start,end, ident, farm):
         else:
             if np.isnan(farm_data[farm]['mean lice']) is False:
                 # print('Using average data for the farm ', farm)
-                return fmay_dataarm_data[farm]['mean lice']
+                return farm_data[farm]['mean lice']
     else:
         print(f'No ID for farm {farm}')
 
