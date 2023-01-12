@@ -662,7 +662,7 @@ p=Proj("epsg:3857", preserve_units=False)
 
 ##################### FETCH DATA ###################
 # test local vs host
-rootdir='/data/'
+rootdir='/home/data/'
 
 if 'All_names' not in globals():
     print('loading dataset')
