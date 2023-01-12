@@ -15,11 +15,11 @@ COPY ./app ./
 #RUN --mount=type=bind,target=/data,source=192.168.3.62:/srv/data
 
 # expose the right port?
-EXPOSE 8080
+EXPOSE 8050
 
 # Changing to non-root user
 RUN useradd -m appUser
 USER appUser
 
 # Run locally on port 8080
-CMD gunicorn --bind 0.0.0.0:8080 main:server
+CMD gunicorn --bind 0.0.0.0:8050 main:server

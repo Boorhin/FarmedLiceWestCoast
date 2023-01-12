@@ -662,13 +662,7 @@ p=Proj("epsg:3857", preserve_units=False)
 
 ##################### FETCH DATA ###################
 # test local vs host
-local= '/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app'
-host='/mnt/nfs/home'
-if os.path.exists(local):
-    rootdir=local
-else:
-    rootdir=host
-rootdir+='/'
+rootdir+='/data/'
 
 if 'All_names' not in globals():
     print('loading dataset')
@@ -970,4 +964,4 @@ def update_control(tab):
        return False
 
 if __name__ == '__main__':
-    app.run_server(host='0.0.0.0', port=8080, debug=True)
+    app.run_server(host='0.0.0.0', port=8050, debug=True)
