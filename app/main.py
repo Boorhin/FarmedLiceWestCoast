@@ -692,7 +692,7 @@ if 'farm_data' not in globals():
     csvfile='biomasses.csv'
     farm_data, times, tree, Ids =read_farm_data(rootdir+csvfile)
     print('Farm loaded')
-    sepacsv= 'data/SEPA_GSID.csv'
+    sepacsv= 'SEPA_GSID.csv'
     farm_data=add_new_SEPA_nb(rootdir+sepacsv)
     
 
