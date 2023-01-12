@@ -667,7 +667,7 @@ rootdir='/mnt/nfs/data/'
 if 'All_names' not in globals():
     print('loading dataset')
 
-    master='data/westcoast_map_trim.zarr' #needs to go in the share drive
+    master='westcoast_map_trim.zarr' #needs to go in the share drive
     super_ds=open_zarr(rootdir+master).drop('North Kilbrannan')  
     All_names=np.array(list(super_ds.keys()))
     ## remove border effects
@@ -677,7 +677,7 @@ if 'All_names' not in globals():
 ref_biom=np.zeros(len(All_names))
     
 if 'lice_data' not in globals():
-    liceStore='data/consolidated_sealice_data_2017-2021.zarr'
+    liceStore='consolidated_sealice_data_2017-2021.zarr'
     lice_data=open_zarr(rootdir+liceStore)
     ### mess in raw data
     id_c=250
@@ -689,7 +689,7 @@ if 'lice_data' not in globals():
     
     
 if 'farm_data' not in globals():
-    csvfile='data/biomasses.csv'
+    csvfile='biomasses.csv'
     farm_data, times, tree, Ids =read_farm_data(rootdir+csvfile)
     print('Farm loaded')
     sepacsv= 'data/SEPA_GSID.csv'
@@ -771,7 +771,7 @@ app.layout = dbc.Container([
 
 @cache.memoize()
 def global_store(r):
-    pathtods=f'data/map_{r}m.zarr'
+    pathtods=f'map_{r}m.zarr'
     print('using global store ', pathtods)
     super_ds=open_zarr(rootdir+pathtods).drop('North Kilbrannan')
     ## remove border effects
