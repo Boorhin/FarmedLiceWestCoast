@@ -22,4 +22,4 @@ RUN useradd -m appUser
 USER appUser
 
 # Run locally on port 8080
-CMD gunicorn --bind 0.0.0.0:8050 main:server
+CMD gunicorn --workers=4 --bind 0.0.0.0:8050 main:server
