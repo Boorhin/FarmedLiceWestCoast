@@ -17,6 +17,7 @@
 from  xarray import open_zarr
 #from rasterio.enums import Resampling
 import rioxarray
+import json, logging
 #from google.cloud import storage
 import numpy as np
 from scipy.spatial import KDTree
@@ -41,17 +42,21 @@ import dash_daq as daq
 from flask_caching import Cache
 from dash.exceptions import PreventUpdate
 
-#from callbacks import callbacks
+
+
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return json.JSONEncoder.default(self, obj)
+
 
 def get_coordinates(arr):
     coordinates=np.zeros((4,2))
-
     coordinates[0]=p(arr.x.values[0],arr.y.values[0], inverse=True)
     coordinates[1]=p(arr.x.values[-1],arr.y.values[0], inverse=True)
     coordinates[2]=p(arr.x.values[-1],arr.y.values[-1], inverse=True)
     coordinates[3]=p(arr.x.values[0],arr.y.values[-1], inverse=True)
-
-    #print(coordinates)
     return coordinates[::-1]
     
 def calculate_edge(coordinates):
@@ -70,12 +75,12 @@ def mk_img(ds_host, name_list, span, Coeff,cmp):
     '''
     Create an image to project on mabpox
     '''
-    print('making raster...')
+    logger.info('making raster...')
     subds=ds_host[name_list]
     for i in range(len(name_list)):
         subds[name_list[i]].values *=Coeff[i]
     arr= subds.to_stacked_array('v', ['y', 'x']).sum(dim='v')
-    print('data stacked')
+    logger.info('data stacked')
     #lat=[56.8, 56.3, 56.15, 56.65, 56.8]
     #lon=[-8, -7.45,-7.7, -8.2, -8]
 
@@ -90,7 +95,7 @@ def mk_img(ds_host, name_list, span, Coeff,cmp):
               }
           ]
     arr= arr.rio.write_crs(3857, inplace=True).rio.clip(polyg, invert=True, crs=3857)
-    print('data cropped')
+    logger.info('data cropped')
     
     return tf.shade(arr.where(arr>0).load(),
                     cmap=cmp, how='linear',
@@ -106,12 +111,12 @@ def add_new_SEPA_nb(sepafile):
            try:
                farm_data[line[0]]['GSID']=line[1]
            except:
-               print(f'{line[0]} not found in farmdata')
+               logger.debug(f'{line[0]} not found in farmdata')
     return farm_data
 
 def read_farm_data(farmfile):
     data={}
-    print('########## READING BIOMASS DATA #######')
+    logger.info('########## READING BIOMASS DATA #######')
     with open(farmfile) as f:
         head=f.readline().strip().split(',')[21:]
         times = np.array([datetime.strptime(h,'%m/%d/%Y') for h in head])
@@ -119,7 +124,6 @@ def read_farm_data(farmfile):
         id=0
         for line in f:   
             line=line.strip().split(',')
-            #print('Reading data for - ', line[0])
             data[line[0]]= {'additional location':line[1],
                             'Name MS': line[2],
                             'Site ID SEPA': line[3].strip(),
@@ -148,18 +152,16 @@ def read_farm_data(farmfile):
             data[line[0]]['biomasses']=biom
             data[line[0]]['lice data'], data[line[0]]['mean lice']=add_lice_data(line[4])       
             if ref==0:
-                # print('NDV in ',line[0]) 
                 id -=1 
                 del data[line[0]]
             #ref_biom[id]=ref
-    print('########## BIOMASS DATA READ ###########')
-    print('########## Making KDe Tree   ###########')
+    logger.info('########## BIOMASS DATA READ ###########')
+    logger.info('########## Making KDe Tree   ###########')
     Xs= np.array([data[farm]['lon'] for farm in data.keys()])
     Ys= np.array([data[farm]['lat'] for farm in data.keys()])
     Ids=np.array([data[farm]['Site ID Scot env'] for farm in data.keys()])
-    # print(Ids)
     tree = KDTree(np.vstack((Xs,Ys)).T)
-    print('########## Tree Made ############')
+    logger.info('########## Tree Made ############')
     return data, times, tree, Ids
 
 def add_lice_data(SEPA_ID):
@@ -207,21 +209,18 @@ def search_lice_data(start,end, ident, farm):
     if not, try to return the average lice value for the farm.
     '''
     if len(ident) >0:
-        # print(ident, farm)
         may_data= lice_data[ident].sel(time=slice(start,end)).mean().values
         if not np.isnan(may_data):
             if may_data>0:
-                # print(f'found lice data in may for {farm}, {ident}')
                 return may_data
         else:
             if np.isnan(farm_data[farm]['mean lice']) is False:
-                # print('Using average data for the farm ', farm)
                 return farm_data[farm]['mean lice']
     else:
-        print(f'No ID for farm {farm}')
-
+        logger.debug(f'No ID for farm {farm}')
     
-def fetch_biomass(activated_farms, biomass_factor, lice_factor, year=2004):
+    
+def fetch_biomass(activated_farms, biomass_factor, lice_factor, year=2021):
     '''
     Identify the biomass data for the month of may of the chosen year
     scale the data according to data
@@ -237,7 +236,6 @@ def fetch_biomass(activated_farms, biomass_factor, lice_factor, year=2004):
         extract=farm_data[farm]['biomasses'][filters].mean()
         if np.isnan(extract):
             activated_farms[farm_data[farm]['ID']]= False
-            # print(f'{farm} is not stocked')
         else:
             biomass_factor[farm_data[farm]['ID']]=extract/farm_data[farm]['reference biomass']
             ref_biom[farm_data[farm]['ID']]=farm_data[farm]['reference biomass']
@@ -245,13 +243,11 @@ def fetch_biomass(activated_farms, biomass_factor, lice_factor, year=2004):
             if local_data is not None :
                 lice_factor[farm_data[farm]['ID']]=local_data
             else:
-                # print('searching nearby farms')
                 seek= tree.query(np.array([farm_data[farm]['lon'], farm_data[farm]['lat']]).T, n)[1]
                 for i in range(n):
                     remote_data= search_lice_data(start,end, Ids[i], farm)
                     if remote_data is not None :
                         lice_factor[farm_data[farm]['ID']]=remote_data
-                        # print(f'Used data from {Ids[i]} to populate {farm}')
                         break
     return activated_farms, biomass_factor, lice_factor, ref_biom
 
@@ -259,7 +255,7 @@ def fetch_biomass(activated_farms, biomass_factor, lice_factor, year=2004):
 #####################TAB 1 ###########################
 
 def make_base_figure(farm_data, center_lat, center_lon, span, cmp, template):
-    print('Making figure ...')
+    logger.info('Making figure ...')
     fig= go.Figure()
     fig.add_trace(go.Scatter(x=[None], y=[None],marker=go.scatter.Marker(
                         colorscale=cmp,
@@ -309,7 +305,7 @@ def make_base_figure(farm_data, center_lat, center_lon, span, cmp, template):
                     zoom=5.5,
                     style="carto-darkmatter",
                     ))
-    print('figure done.')
+    logger.info('figure done.')
     return fig
 
 def comment_card(start, end):
@@ -426,8 +422,8 @@ def tab1_layout(farm_data,center_lat, center_lon, span, cmp, template):
                         id='figure_loading',
                         children=[html.Div(id='heatmap_output'),],
                         type='graph',
-                        fullscreen=True
-                        )
+                        fullscreen=False
+                        ),
                     ], width=10),
                 dbc.Col([
                     html.P(
@@ -553,7 +549,6 @@ def mk_farm_evo(name, times):
                      showgrid=False ),
         margin=dict(b=15, l=15, r=5, t=5),
     )
-    # print(fig_p['layout']['shapes'][0])
     return fig_p
     
 def togglingyears():
@@ -636,7 +631,14 @@ def tab3_layout(All_names):
     ])
 ])
 
-
+#### SET LOGGER #####
+logger = logging.getLogger('sealice_logger')
+logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S', level=logging.DEBUG)
+#logger.setLevel(logging.DEBUG) #future use env variable
+#handler= logging.FileHandler('mylog.log')
+#formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+#handler.setFormatter(formatter)
+# logger.addHandler(handler)
 
 ############# VARIABLES ##########################33
 span=[0,2] # value extent
@@ -676,8 +678,7 @@ p=Proj("epsg:3857", preserve_units=False)
 rootdir='/mnt/nfs/data/'
 
 if 'All_names' not in globals():
-    print('loading dataset')
-
+    logger.info('loading dataset')
     master='westcoast_map_trim.zarr' #needs to go in the share drive
     super_ds=open_zarr(rootdir+master).drop('North Kilbrannan')  
     All_names=np.array(list(super_ds.keys()))
@@ -702,7 +703,7 @@ if 'lice_data' not in globals():
 if 'farm_data' not in globals():
     csvfile='biomasses.csv'
     farm_data, times, tree, Ids =read_farm_data(rootdir+csvfile)
-    print('Farm loaded')
+    logger.info('Farm loaded')
     sepacsv= 'SEPA_GSID.csv'
     farm_data=add_new_SEPA_nb(rootdir+sepacsv)
     
@@ -756,6 +757,8 @@ current_biomass=[farm_data[farm]['reference biomass']*
 Coeff=30/16.9*biomass_factor[idx]*lice_factor[idx]
 alllice=(Coeff*ref_biom[idx]).sum()*4.5*1000
 
+
+
 ######### APP DEFINITION ############
 app = dash.Dash(__name__,
                 external_stylesheets=[url_theme1],#, dbc_css
@@ -778,7 +781,9 @@ app.title="Heatmap Dashboard"
 app.layout = dbc.Container([
     #Store
     html.Div([
-        dcc.Store(id='my-store'),
+        dcc.Store(id='bubbles', storage_type='session'),
+        dcc.Store(id='lice_store', storage_type='session'),
+        
     #header
         html.Div([
             html.H1('Visualisation of the Scottish Westcoast added sealice infestation'),
@@ -803,12 +808,12 @@ app.layout = dbc.Container([
 @cache.memoize()
 def global_store(r):
     pathtods=f'map_{r}m.zarr'
-    print('using global store ', pathtods)
+    logger.info(f'using global store {pathtods}')
     super_ds=open_zarr(rootdir+pathtods).drop('North Kilbrannan')
     ## remove border effects
     super_ds= super_ds.where(super_ds.x<-509600) 
     
-    print('global store loaded')
+    logger.info('global store loaded')
     return super_ds
 
 
@@ -831,116 +836,140 @@ def toggle_egg_models(eggs):
     else:
         return 'Rittenhouse et al. (2016)'
 
-#@app.callback(
-#    [Output({'type':'biomass_slider', 'id':ALL}, 'value'),
-#    Output({'type':'lice_slider', 'id':ALL}, 'value')],
-#    [Input('master_lice_slider', 'value'),
-#    Input('master_biomass_slider','value')],
-#    [State({'type':'biomass_slider', 'id':ALL},'value')]
-#)
-#def update_all_sliders(lice, biom, l):
-#    Nb=len(l)
-#    return (np.ones(Nb)*biom).tolist(), (np.ones(Nb)*lice).tolist()
-
 @app.callback(
-    [Output('heatmap', 'figure'),
-    Output('heatmap_output', 'children'),
-    Output('LED_biomass','value'),
-    Output('LED_egg','value'),
-    ],
-    [#Input('submit_map','n_clicks'),
-    Input(ThemeSwitchAIO.ids.switch("theme"), "value"),
-    Input('power_streaming','on'),
-    Input('heatmap', 'relayoutData'),
-    Input('year_slider','value'),
-    Input('biomass_knob','value'),
-    Input('lice_knob','value'),
-    Input('lice_meas_toggle','on'),
-    Input('span-slider','value') ,
-    ],
-    [  
-    State('power_streaming','on'),
-    State('egg_toggle','on'),
-    State({'type':'switch', 'id':ALL},'on'),
-    #State({'type':'biomass_slider', 'id':ALL},'value'),
-    #State({'type':'lice_slider', 'id':ALL},'value'),
-    
-    #State('resolution-slider','value'),
-    State('heatmap', 'figure'),
-    State('progress-curves','figure'),
-    ]
-)
-def redraw( toggle,  power, relay,year, biomC, liceC, meas,  span,state_power, egg,  idx2, fig, curves): 
-    ctx = dash.callback_context
-    
+    Output('lice_store','data'),
+    [Input('lice_knob','value'),
+    Input('egg_toggle','on')],
+    Input('lice_meas_toggle','on')
+    )
+def compute_lice_data(liceC, egg, meas):
+    logger.info('scaling lice')
+    logger.debug(f'egg is {egg}')
     # modify egg model from Rittenhouse (16.9) to Stein (30)
     if egg:
         # lices *= 30/16.9
         c_lice=30/16.9
     else:
         c_lice=1
-    ### toggle themes
-    if ctx.triggered[0]['prop_id'] == 'toggle.value':
-        template = template_theme1 if toggle else template_theme2
-        cmp= cmp1 if toggle else cmp2
-        carto_style= carto_style1 if toggle else carto_style2
-        fig['layout']['template']=mk_template(template)
-        fig['layout']['mapbox']['style']=carto_style
-    
-    # Scaling
-    if ctx.triggered[0]['prop_id'] == 'year_slider.value' or \
-            ctx.triggered[0]['prop_id'] =='biomass_knob.value' or \
-            ctx.triggered[0]['prop_id'] =='lice_knob.value' or \
-            ctx.triggered[0]['prop_id'] =='lice_meas_toggle.on':
-        activated_farms= np.ones(len(All_names), dtype='bool')
-        Coeff=np.ones(len(All_names)) 
-        biomass_factor=np.ones(len(All_names))
-        lice_factor=np.ones(len(All_names))/2
-        if biomC ==0:
-            biomC=0.00001
+    lice_factor=np.ones(len(All_names))/2
+    if not meas:
+        liceC *=2
         if liceC==0:
             liceC=0.00001
-        biomC /=100
-        liceC *=2
-        print('preparing lice factor')
-        idx, biomass_factor, lice_factor, ref_biom=fetch_biomass(activated_farms, 
+        lice_factor*=liceC
+    lice_factor *= c_lice
+    return json.dumps({'lice factor': lice_factor}, cls=NumpyEncoder)
+
+@app.callback(
+    Output('bubbles','data'),
+    [
+    Input('year_slider','value'),
+    Input('biomass_knob','value'),
+    Input('lice_store','modified_timestamp'),    
+    ],
+    [
+    State('lice_store','data'),
+    State('lice_meas_toggle','on')
+    ]
+)
+def mk_bubbles(year, biomC,lice_tst, lice_data, meas):
+    logger.info('making bubble')
+    activated_farms= np.ones(len(All_names), dtype='bool')
+    Coeff=np.ones(len(All_names)) 
+    biomass_factor=np.ones(len(All_names))
+    lice_factor=np.ones(len(All_names))/2
+    if biomC ==0:
+        biomC=0.00001
+    biomC /=100
+    logger.info('preparing lice factor')
+    idx, biomass_factor, lice_factor, ref_biom=fetch_biomass(activated_farms, 
                                                      biomass_factor, lice_factor, year)
-        # decide source lice data
-        if meas:
-            lice_factor=np.ones(len(All_names))/2*liceC
-        name_list=np.array(list(farm_data.keys()))[idx] 
-    
-        ##### update discs farms
-        current_biomass=[farm_data[farm]['reference biomass']*
+    # overwrite the computed lice... needs to change
+    if not meas:
+        lice_factor=np.asarray(json.loads(lice_data)['lice factor'])
+
+    name_list=np.array(list(farm_data.keys()))[idx]    
+    ##### update discs farms
+    current_biomass=[farm_data[farm]['reference biomass']*
                                            biomass_factor[farm_data[farm]['ID']] *biomC
                                            for farm in name_list]
-        # print(current_biomass)
         # set global factor biomass x individual farm biom x individual lice x egg model
-        Coeff=biomC*biomass_factor[idx]*lice_factor[idx]*c_lice 
-        alllice=(Coeff*ref_biom[idx]).sum()*4.5*1000
-        fig['data'][1]=go.Scattermapbox(
-                                lat=[farm_data[farm]['lat'] for farm in name_list],
-                                lon=[farm_data[farm]['lon'] for farm in name_list],
-                                text=name_list,
+    Coeff=biomC*biomass_factor[idx]*lice_factor[idx]
+    alllice=(Coeff*ref_biom[idx]).sum()*4.5*1000
+    return json.dumps({ 
+         'coeff': Coeff,
+         'all lice': alllice,
+         'name list': name_list,
+         'current biomass':current_biomass,
+         'year': year,
+         }, cls=NumpyEncoder)
+     
+@app.callback(
+    Output('LED_biomass','value'),
+    Output('LED_egg','value'),
+    Input('bubbles','modified_timestamp'),
+    State('bubbles','data')
+)
+def populate_LED(bubble_tmst, bubble_data):
+    logger.info('modifying LED values')
+    dataset= json.loads(bubble_data)
+    return int(sum(dataset['coeff'])*1000), int(dataset['all lice'])
+
+@app.callback(
+    [Output('heatmap', 'figure'),
+    Output('heatmap_output', 'children'),
+    ],
+    [
+    Input(ThemeSwitchAIO.ids.switch("theme"), "value"),
+    Input('power_streaming','on'),
+    Input('heatmap', 'relayoutData'),  
+    Input('span-slider','value') ,
+    Input('bubbles','modified_timestamp'),
+    ],
+    [  
+    State('bubbles','data'),
+    State('power_streaming','on'),
+    State('heatmap', 'figure'),
+    ]
+)
+def redraw( toggle, power, relay, span, bubble_tmst, bubble_data, state_power, fig): 
+    ctx = dash.callback_context
+    logger.info('drawing the map')
+    # logger.debug(f'bubble data {bubble_data}')
+    dataset= json.loads(bubble_data)
+    logger.debug(f'power is {power}')
+    logger.debug(f'state_power is {state_power}')
+    
+    ### toggle themes    
+    template = template_theme1 if toggle else template_theme2
+    cmp= cmp1 if toggle else cmp2
+    carto_style= carto_style1 if toggle else carto_style2
+    fig['layout']['template']=mk_template(template)
+    fig['layout']['mapbox']['style']=carto_style
+    
+    ### draw bubbles   
+    fig['data'][1]=go.Scattermapbox(
+                                lat=[farm_data[farm]['lat'] for farm in dataset['name list']],
+                                lon=[farm_data[farm]['lon'] for farm in dataset['name list']],
+                                text=dataset['name list'],
                                 hovertemplate="<b>%{text}</b><br><br>" + \
                                         "Biomass: %{marker.size:.0f} tons<br>",
                                 marker=dict(color='#62c462',
-                                    size=current_biomass,
+                                    size=dataset['current biomass'],
                                     sizemode='area',
                                     sizeref=10,
                                     showscale=False,
                                     ),
-                                name=f'Processed with biomass of may {year}')
-
+                                name=f"Processed with biomass of may {dataset['year']}")
+    
+    fig['data'][0]['marker']['colorscale']=mk_colorscale(cmp)
+    fig['data'][0]['marker']['cmax']=span[1]
+    fig['data'][0]['marker']['cmin']=span[0]
     ### update heatmap
-    if power or ctx.triggered[0]['prop_id'] =='span-slider.value': 
-        if ctx.triggered[0]['prop_id'] =='span-slider.value':
-            fig['data'][0]['marker']['colorscale']=mk_colorscale(cmp)
-            fig['data'][0]['marker']['cmax']=span[1]
-            fig['data'][0]['marker']['cmin']=span[0]
-             
-        if idx.sum()>0:
-            print('rasterizing map')
+    if state_power : 
+            
+        #if idx.sum()>0:
+            logger.info('rasterizing map')
             ####
             # remove Achintraid because only NaN for some reason
             idx[0]=False
@@ -951,7 +980,7 @@ def redraw( toggle,  power, relay,year, biomC, liceC, meas,  span,state_power, e
             else:
                 zoom=fig['layout']['mapbox']['zoom']
             r = select_zoom(zoom)
-            print('zoom: ', zoom,' , resolution: ',r)
+            logger.debug(f'zoom: {zoom}, resolution: {r}')
             super_ds=global_store(r)
             coordinates=get_coordinates(super_ds)
 
@@ -963,13 +992,13 @@ def redraw( toggle,  power, relay,year, biomC, liceC, meas,  span,state_power, e
                                         "coordinates": coordinates
                                     },
                                     ]
-        else:
+        #else:
             # add a message?
-            fig['layout']['mapbox']['layers']=[]
-        relayed_zoom= zoom
+        #    fig['layout']['mapbox']['layers']=[]
+            relayed_zoom= zoom
     ## led values
     
-    return fig, None, sum(current_biomass)*1000, int(alllice)
+    return fig, None
 
 
 @app.callback([

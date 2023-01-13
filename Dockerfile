@@ -19,7 +19,6 @@ EXPOSE 8050
 
 # Changing to non-root user
 RUN useradd -m appUser
-RUN usermod -aG admins appUser
 USER appUser
 
 # Run locally on port 8080
