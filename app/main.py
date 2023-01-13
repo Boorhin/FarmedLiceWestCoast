@@ -422,7 +422,7 @@ def tab1_layout(farm_data,center_lat, center_lon, span, cmp, template):
                         id='figure_loading',
                         children=[html.Div(id='heatmap_output'),],
                         type='graph',
-                        fullscreen=False
+                        fullscreen=True
                         ),
                     ], width=10),
                 dbc.Col([
@@ -633,7 +633,7 @@ def tab3_layout(All_names):
 
 #### SET LOGGER #####
 logger = logging.getLogger('sealice_logger')
-logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S', level=logging.DEBUG)
+logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S', level=logging.INFO)
 #logger.setLevel(logging.DEBUG) #future use env variable
 #handler= logging.FileHandler('mylog.log')
 #formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
