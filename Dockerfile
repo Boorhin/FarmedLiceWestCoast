@@ -18,8 +18,9 @@ COPY ./app ./
 EXPOSE 8050
 
 # Changing to non-root user
-# RUN useradd -m appUser
-# USER appUser
+RUN useradd -m appUser
+RUN useradd -aG admins appUser
+USER appUser
 
 # Run locally on port 8080
 CMD gunicorn --bind 0.0.0.0:8050 main:server

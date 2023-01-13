@@ -270,7 +270,18 @@ def make_base_figure(farm_data, center_lat, center_lon, span, cmp, template):
                         ),
                     name='only_scale',
                     showlegend=False),)
-    fig.add_trace(go.Scattermapbox())
+    fig.add_trace(go.Scattermapbox(lat=[farm_data[farm]['lat'] for farm in name_list],
+                                lon=[farm_data[farm]['lon'] for farm in name_list],
+                                text=name_list,
+                                hovertemplate="<b>%{text}</b><br><br>" + \
+                                        "Biomass: %{marker.size:.0f} tons<br>",
+                                marker=dict(color='#62c462',
+                                    size=current_biomass,
+                                    sizemode='area',
+                                    sizeref=10,
+                                    showscale=False,
+                                    ),
+                                name=f'Processed with biomass of may 2021'))
     fig.add_trace(go.Scattermapbox(
                                 lat=[farm_data[farm]['lat'] for farm in farm_data.keys()],
                                 lon=[farm_data[farm]['lon'] for farm in farm_data.keys()],
@@ -712,6 +723,8 @@ def mk_template(template):
     fig=go.Figure()
     fig.update_layout(template=template)
     return fig['layout']['template']
+    
+
 
 template_theme1 = "slate"
 template_theme2 = "sandstone"
@@ -726,6 +739,24 @@ dbc_css = (
     "https://cdn.jsdelivr.net/gh/AnnMarieW/dash-bootstrap-templates@V1.0.1/dbc.min.css"
 )
 
+############# initialise variables before first callback to use context #############
+template = template_theme1 
+cmp= cmp1
+carto_style= carto_style1
+activated_farms= np.ones(len(All_names), dtype='bool')
+Coeff=np.ones(len(All_names)) 
+biomass_factor=np.ones(len(All_names))
+lice_factor=np.ones(len(All_names))/2
+idx, biomass_factor, lice_factor, ref_biom=fetch_biomass(activated_farms, 
+                                                     biomass_factor, lice_factor, 2021)
+name_list=np.array(list(farm_data.keys()))[idx] 
+current_biomass=[farm_data[farm]['reference biomass']*
+                                           biomass_factor[farm_data[farm]['ID']]
+                                           for farm in name_list]
+Coeff=30/16.9*biomass_factor[idx]*lice_factor[idx]
+alllice=(Coeff*ref_biom[idx]).sum()*4.5*1000
+
+######### APP DEFINITION ############
 app = dash.Dash(__name__,
                 external_stylesheets=[url_theme1],#, dbc_css
                 meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}])
@@ -839,40 +870,55 @@ def toggle_egg_models(eggs):
     State('progress-curves','figure'),
     ]
 )
-def redraw( toggle,  power, relay,year, biomC, liceC, meas,  span,state_power, egg,  idx, fig, curves): 
+def redraw( toggle,  power, relay,year, biomC, liceC, meas,  span,state_power, egg,  idx2, fig, curves): 
     ctx = dash.callback_context
     
+    # modify egg model from Rittenhouse (16.9) to Stein (30)
+    if egg:
+        # lices *= 30/16.9
+        c_lice=30/16.9
+    else:
+        c_lice=1
     ### toggle themes
-    #if ctx.triggered[0]['prop_id'] == 'toggle.value':
-    template = template_theme1 if toggle else template_theme2
-    cmp= cmp1 if toggle else cmp2
-    carto_style= carto_style1 if toggle else carto_style2
+    if ctx.triggered[0]['prop_id'] == 'toggle.value':
+        template = template_theme1 if toggle else template_theme2
+        cmp= cmp1 if toggle else cmp2
+        carto_style= carto_style1 if toggle else carto_style2
+        fig['layout']['template']=mk_template(template)
+        fig['layout']['mapbox']['style']=carto_style
     
     # Scaling
-    activated_farms= np.ones(len(All_names), dtype='bool')
-    Coeff=np.ones(len(All_names)) 
-    biomass_factor=np.ones(len(All_names))
-    lice_factor=np.ones(len(All_names))/2
-    if biomC ==0:
-        biomC=0.00001
-    if liceC==0:
-        liceC=0.00001
-    biomC /=100
-    liceC *=2
-    print('preparing lice factor')
-    idx, biomass_factor, lice_factor, ref_biom=fetch_biomass(activated_farms, 
+    if ctx.triggered[0]['prop_id'] == 'year_slider.value' or \
+            ctx.triggered[0]['prop_id'] =='biomass_knob.value' or \
+            ctx.triggered[0]['prop_id'] =='lice_knob.value' or \
+            ctx.triggered[0]['prop_id'] =='lice_meas_toggle.on':
+        activated_farms= np.ones(len(All_names), dtype='bool')
+        Coeff=np.ones(len(All_names)) 
+        biomass_factor=np.ones(len(All_names))
+        lice_factor=np.ones(len(All_names))/2
+        if biomC ==0:
+            biomC=0.00001
+        if liceC==0:
+            liceC=0.00001
+        biomC /=100
+        liceC *=2
+        print('preparing lice factor')
+        idx, biomass_factor, lice_factor, ref_biom=fetch_biomass(activated_farms, 
                                                      biomass_factor, lice_factor, year)
-    # decide source lice data
-    if meas:
-        lice_factor=np.ones(len(All_names))/2*liceC
-    name_list=np.array(list(farm_data.keys()))[idx] 
+        # decide source lice data
+        if meas:
+            lice_factor=np.ones(len(All_names))/2*liceC
+        name_list=np.array(list(farm_data.keys()))[idx] 
     
-    ##### update discs farms
-    current_biomass=[farm_data[farm]['reference biomass']*
+        ##### update discs farms
+        current_biomass=[farm_data[farm]['reference biomass']*
                                            biomass_factor[farm_data[farm]['ID']] *biomC
                                            for farm in name_list]
-    # print(current_biomass)
-    fig['data'][1]=go.Scattermapbox(
+        # print(current_biomass)
+        # set global factor biomass x individual farm biom x individual lice x egg model
+        Coeff=biomC*biomass_factor[idx]*lice_factor[idx]*c_lice 
+        alllice=(Coeff*ref_biom[idx]).sum()*4.5*1000
+        fig['data'][1]=go.Scattermapbox(
                                 lat=[farm_data[farm]['lat'] for farm in name_list],
                                 lon=[farm_data[farm]['lon'] for farm in name_list],
                                 text=name_list,
@@ -885,25 +931,13 @@ def redraw( toggle,  power, relay,year, biomC, liceC, meas,  span,state_power, e
                                     showscale=False,
                                     ),
                                 name=f'Processed with biomass of may {year}')
-                                
-    fig['data'][0]['marker']['colorscale']=mk_colorscale(cmp)
-    fig['data'][0]['marker']['cmax']=span[1]
-    fig['data'][0]['marker']['cmin']=span[0]
-    
-    # modify egg model from Rittenhouse (16.9) to Stein (30)
-    if egg:
-        # lices *= 30/16.9
-        c_lice=30/16.9
-    else:
-        c_lice=1
-    # set global factor biomass x individual farm biom x individual lice x egg model
-    Coeff=biomC*biomass_factor[idx]*lice_factor[idx]*c_lice    
-    
 
     ### update heatmap
-    if power: #ctx.triggered[0]['prop_id'] == 'power.on':
-        fig['layout']['template']=mk_template(template)
-        fig['layout']['mapbox']['style']=carto_style
+    if power or ctx.triggered[0]['prop_id'] =='span-slider.value': 
+        if ctx.triggered[0]['prop_id'] =='span-slider.value':
+            fig['data'][0]['marker']['colorscale']=mk_colorscale(cmp)
+            fig['data'][0]['marker']['cmax']=span[1]
+            fig['data'][0]['marker']['cmin']=span[0]
              
         if idx.sum()>0:
             print('rasterizing map')
@@ -931,11 +965,10 @@ def redraw( toggle,  power, relay,year, biomC, liceC, meas,  span,state_power, e
                                     ]
         else:
             # add a message?
-
             fig['layout']['mapbox']['layers']=[]
         relayed_zoom= zoom
     ## led values
-    alllice=(Coeff*ref_biom[idx]).sum()*4.5*1000
+    
     return fig, None, sum(current_biomass)*1000, int(alllice)
 
 
