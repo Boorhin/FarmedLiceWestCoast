@@ -10,8 +10,8 @@ colorcet==3.0.0
 dash==2.7.1
 dash_bootstrap_templates==1.0.7
 dash_bootstrap_components==1.2.1
-#dash_extensions==0.1.10
-#dash-mantine-components==0.11.1
+dash_extensions==0.1.10
+dash-mantine-components==0.11.1
 flask_caching==2.0.1
 dash_daq==0.5.0
 gunicorn==20.1.0
