@@ -32,10 +32,13 @@ from datetime import datetime, timedelta
 import os.path
 import dash
 from dash import dcc as dcc
-from dash import html as html
-from dash.dependencies import Input, Output, State, MATCH, ALL
+from dash.exceptions import PreventUpdate
+#from dash import html as html
+# from dash.dependencies import Input, Output, State, MATCH, ALL
+from dash_extensions.enrich import Output, Input, html, State, MATCH, ALL, DashProxy, LogTransform, DashLogger
 import dash_bootstrap_components as dbc
 from dash_bootstrap_templates import ThemeSwitchAIO, load_figure_template
+import dash_mantine_components as dmc
 
 import dash_daq as daq
 
@@ -52,6 +55,7 @@ class NumpyEncoder(json.JSONEncoder):
 
 
 def get_coordinates(arr):
+    logger.debug('compute corner coordinates of filtered dataset')
     coordinates=np.zeros((4,2))
     coordinates[0]=p(arr.x.values[0],arr.y.values[0], inverse=True)
     coordinates[1]=p(arr.x.values[-1],arr.y.values[0], inverse=True)
@@ -67,33 +71,32 @@ def calculate_edge(coordinates):
     #[-2.1601633454028786, 55.988518444614954], 
     #[-10.222445323498363, 55.988518444614954]
     box=np.zeros_like(coordinates)
+    
     for i in range(len(coordinates)):
-       box[i]=p(coordinates[i])
-    return box
+       box[i]=p(coordinates[i,0],coordinates[i,1])
+    corners={'xmin':box[:,0].min()-800,
+             'xmax':box[:,0].max()+800,
+             'ymin':box[:,1].min()-800,
+             'ymax':box[:,1].max()+800
+             }
+    return corners
 
-def mk_img(ds_host, name_list, span, Coeff,cmp):
+def mk_img(ds, span, cmp):
     '''
     Create an image to project on mabpox
     '''
-    logger.info('making raster...')
-    subds=ds_host[name_list]
-    for i in range(len(name_list)):
-        subds[name_list[i]].values *=Coeff[i]
-    arr= subds.to_stacked_array('v', ['y', 'x']).sum(dim='v')
+    logger.info('making raster...')  
+    arr= ds.to_stacked_array('v', ['y', 'x']).sum(dim='v')
     logger.info('data stacked')
-    #lat=[56.8, 56.3, 56.15, 56.65, 56.8]
-    #lon=[-8, -7.45,-7.7, -8.2, -8]
-
     polyg= [{"type":"Polygon",
               "coordinates":[[
-              [-890556, 7719350],
-              [-829330, 7618370],
-              [-857160, 7588335],
-              [-912820, 7688916],
-              [-890556, 7719350]
+                [-890556, 7719350],
+                [-829330, 7618370],
+                [-857160, 7588335],
+                [-912820, 7688916],
+                [-890556, 7719350]
               ]]
-              }
-          ]
+            }]
     arr= arr.rio.write_crs(3857, inplace=True).rio.clip(polyg, invert=True, crs=3857)
     logger.info('data cropped')
     
@@ -163,6 +166,13 @@ def read_farm_data(farmfile):
     tree = KDTree(np.vstack((Xs,Ys)).T)
     logger.info('########## Tree Made ############')
     return data, times, tree, Ids
+
+def read_future_farms(filename):
+    new_farm=np.genfromtxt(filename,
+                           names=True,
+                           delimiter='\t', 
+                           dtype=['U10','U30','i8','f8','f8'])
+    return new_farm
 
 def add_lice_data(SEPA_ID):
     arr= np.empty(261)
@@ -284,10 +294,20 @@ def make_base_figure(farm_data, center_lat, center_lon, span, cmp, template):
                                 text=[farm for farm in farm_data.keys()],
                                 marker=dict(color='#e9ecef', size=4, showscale=False),
                                 name='Mapped farms'))
+    fig.add_trace(go.Scattermapbox(
+                                lat=future_farms['Lat'],
+                                lon=future_farms['Lon'],
+                                text=future_farms['Name'],
+                                hovertemplate="<b>%{text}</b><br><br>" + \
+                                        "Biomass: %{marker.size:.0f} tons<br>",
+                                marker=dict(color='#00ccff',
+                                    size=future_farms['Biomass_tonnes'],
+                                    sizemode='area',
+                                    sizeref=10,
+                                    showscale=False,
+                                    ),
+                                name='Planned farms'))
 
-    #fig.add_trace((go.Scattermapbox(lat=[56.8, 56.3, 56.15, 56.65],
-    #                                lon=[-8, -7.45,-7.7, -8.2], 
-    #                                mode='lines')))
     fig.update_layout(
                 height=512,
                 width=1024,
@@ -354,15 +374,18 @@ def tuning_card():
                         max=8,
                         scale={'start':0, 'labelInterval':10,'interval':0.05},
                         color='#f89406'
-                        )
-                    ]),
-                dbc.Col([
+                        ),
                     daq.BooleanSwitch(
                          id='lice_meas_toggle',
-                         label='Use reported lice',
+                         label='Use and extrapolate reported lice',
                          on=False
                          ),
-                    html.P("Very little data are available on lice infestation. The algorythm will try first to find if there are data in the May season you selected. If there isn't it will try to make an average of recorded lice for the farm. If the farm never reported lice counts then it will use the nearest farm that has data.")
+                    dbc.Tooltip('''Very little data are available on lice infestation. 
+                    This algorithm will first try to find if there are data in the May season you selected. 
+                    If there isn't it will try to make an average of recorded lice for the farm. 
+                    If the farm never reported lice counts then it will use the nearest farm that has data.''',
+                    target='lice_meas_toggle'
+                    )
                     ]),
                 ])
             ])
@@ -372,12 +395,40 @@ def mk_map_pres(): #
     return dbc.Row([
         dbc.Col([
             dbc.Card([
-                dbc.CardHeader('Continuous map update'),
+                dbc.CardHeader('Compute a new density map'),
                 dbc.CardBody([
-                    daq.PowerButton(
-                    	id='power_streaming',
-                    	on=False),
-                    html.Div(id='power_streaming_result')
+                    html.Div(
+                        [dbc.Button('Update density map',
+                            id='trigger', 
+                            n_clicks=0),],
+                        className="d-grid gap-2 d-md-flex justify-content-md-center",
+                        ),
+                    dbc.Tooltip('''
+                        This updates or creates the lice density map according to the parameter you have selected. 
+                        You can simulate a global change of the farm biomasses, the global lice infestation levels, 
+                        use the reported lice from the best data we have and scale the color range. 
+                        The map you produce will depend of the area visible in the map and the level of zoom. 
+                        The resolution available are 800-400-200-100-50 and will change automatically according 
+                        to the zoom in the viewport. If you change a parameter, you will have to press this button 
+                        to see the change. Be patient as this involves very heavy computations and can take a while to refresh. 
+                        ''',
+                        target = 'trigger'),
+                    ])
+                ]),
+            dbc.Card([
+                dbc.CardHeader('Select the contributors to the map'),
+                dbc.CardBody([
+                    daq.BooleanSwitch(id='existing_farms_toggle', 
+                        on=True,
+                        label='Existing farms'),
+                    dbc.Tooltip('Activate this toggle to visualise the lice density from existing farms',
+                        target='existing_farms_toggle'),
+                    daq.BooleanSwitch(id='future_farms_toggle',
+                        on=False,
+                        label='Planned farms'),
+                    dbc.Tooltip('''Activate this toggle to visualise the lice density from planned farms. 
+                                You also have to decide which of these farms to include in the dataset.''',
+                        target='future_farms_toggle'),
                     ])
                 ]),
             dbc.Card([
@@ -392,14 +443,33 @@ def mk_map_pres(): #
                                     html.Div(
                                         id='egg_toggle_output',
                                         style={'text-align':'center'}
-                                        ),])
+                                        ),]),
+                                    dbc.Tooltip('''Choose which egg production model suits best. 
+                                                Rittenhouse et al. based on experimental data, 
+                                                produced an equation that suggested 16 eggs released per hour per adult copepodid. 
+                                                Stein 2005, based on model matching of real data suggest 30 eggs /hour.''', 
+                                        target= 'egg_toggle',
+                                        placement='bottom'),
                                 ])
                             )
                         ])
         ],width=3),
         dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader('Select the planned farms to include in the map'),
+                        dbc.CardBody([
+                            dcc.Checklist(
+                                id='planned_checklist',
+                                options=future_farms['Name'],
+                                inline=False,
+                                labelStyle={'display': 'block'},
+                                ),     
+                            ]),
+                        ]),
+            ],width=3),
+        dbc.Col([
             tuning_card()
-        ],width=9),
+        ],width=6),
     ]),
 
 def tab1_layout(farm_data,center_lat, center_lon, span, cmp, template):
@@ -436,10 +506,10 @@ def tab1_layout(farm_data,center_lat, center_lon, span, cmp, template):
                      dcc.RangeSlider(
                                 id='span-slider',
                                 min=0,
-                                max=20,
-                                step=0.5,
-                                marks={n:'%s' %n for n in range(21)},
-                                value=[0,2],
+                                max=10,
+                                step=0.25,
+                                marks={n:'%s' %n for n in range(11)},
+                                value=[0,0.75],
                                 vertical=True,
                                 )
                     ], width=1)
@@ -473,7 +543,7 @@ def tab1_layout(farm_data,center_lat, center_lon, span, cmp, template):
                     dbc.Col([
                         daq.LEDDisplay(
                             id='LED_biomass',
-                            label='Total fish farmed in may (kg)',
+                            label='Total fish farmed in may (tons)',
                             color='#f89406',
                             backgroundColor='#7a8288',
                             ),
@@ -632,8 +702,11 @@ def tab3_layout(All_names):
 ])
 
 #### SET LOGGER #####
+logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S')
 logger = logging.getLogger('sealice_logger')
-logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S', level=logging.INFO)
+logger.setLevel(logging.DEBUG)
+autocl=2000 #time to close notification
+
 #logger.setLevel(logging.DEBUG) #future use env variable
 #handler= logging.FileHandler('mylog.log')
 #formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -641,7 +714,7 @@ logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m
 # logger.addHandler(handler)
 
 ############# VARIABLES ##########################33
-span=[0,2] # value extent
+span=[0,0.75] # value extent
 resolution=[50,100,200,400,800]
 zooms=[9,8,7,6,5]
 center_lat,center_lon=57.1, -6.4
@@ -675,7 +748,11 @@ p=Proj("epsg:3857", preserve_units=False)
 
 ##################### FETCH DATA ###################
 # test local vs host
-rootdir='/mnt/nfs/data/'
+if os.path.exists('/mnt/nfs/data/'):
+    rootdir='/mnt/nfs/data/'
+else:
+    rootdir='/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'
+
 
 if 'All_names' not in globals():
     logger.info('loading dataset')
@@ -684,6 +761,7 @@ if 'All_names' not in globals():
     All_names=np.array(list(super_ds.keys()))
     ## remove border effects
     super_ds= super_ds.where(super_ds.x<-509600)
+    future_farms=read_future_farms(rootdir+'future_farms.txt')
 
 
 ref_biom=np.zeros(len(All_names))
@@ -760,9 +838,11 @@ alllice=(Coeff*ref_biom[idx]).sum()*4.5*1000
 
 
 ######### APP DEFINITION ############
-app = dash.Dash(__name__,
+app = DashProxy(__name__,
                 external_stylesheets=[url_theme1],#, dbc_css
-                meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}])
+                meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
+                transforms=[LogTransform()]
+                )
 server=app.server
 cache = Cache(app.server, config={
     'CACHE_TYPE': 'filesystem',
@@ -783,10 +863,18 @@ app.layout = dbc.Container([
     html.Div([
         dcc.Store(id='bubbles', storage_type='session'),
         dcc.Store(id='lice_store', storage_type='session'),
+        dcc.Store(id='view_store', storage_type='session'),
+        dcc.Store(id='theme_store', storage_type='session'),
+        dcc.Store(id='planned_store', storage_type='session'),
         
     #header
-        html.Div([
-            html.H1('Visualisation of the Scottish Westcoast added sealice infestation'),
+        html.Div([ 
+            html.Img(src='assets/logo.svg',
+                     width=96,
+                     alt='logo',
+                     style={'float':'right', 'padding':'5px'},
+                     className='logo'),          
+            html.H1('Scottish Westcoast artificial sealice infestation'),
             ThemeSwitchAIO(aio_id='theme',
                     icons={"left": "fa fa-sun", "right": "fa fa-moon"},
                     themes=[url_theme1, url_theme2])
@@ -807,30 +895,46 @@ app.layout = dbc.Container([
 
 @cache.memoize()
 def global_store(r):
-    pathtods=f'map_{r}m.zarr'
+    pathtods=f'curr_{r}m.zarr'
+    pathtofut=f'planned_{r}m.zarr'
     logger.info(f'using global store {pathtods}')
-    super_ds=open_zarr(rootdir+pathtods).drop('North Kilbrannan')
+    super_ds=open_zarr(rootdir+pathtods) #.drop('North Kilbrannan')
+    planned_ds= open_zarr(rootdir+pathtofut)
     ## remove border effects
-    super_ds= super_ds.where(super_ds.x<-509600) 
-    
-    logger.info('global store loaded')
-    return super_ds
+    super_ds= super_ds.where(super_ds.x<-509600)   
+    return super_ds, planned_ds
 
-
+@app.callback(
+    Output('theme_store', 'data'),
+    Input(ThemeSwitchAIO.ids.switch("theme"), "value"),
+    log= True 
+)
+def record_theme(toggle, dash_logger: DashLogger):
+    dash_logger.info('Switching themes', autoClose=autocl)
+     ### toggle themes    
+    theme={}
+    theme['template'] = template_theme1 if toggle else template_theme2
+    theme['cmp']= cmp1 if toggle else cmp2
+    theme['carto_style']= carto_style1 if toggle else carto_style2
+    return json.dumps(theme)
 
 @app.callback(
     [Output({'type':'biomass_slider', 'id':MATCH}, 'disabled'),
     Output({'type':'lice_slider', 'id':MATCH}, 'disabled')],
     Input({'type':'switch', 'id':MATCH},'on'),
+    #log=True
 )
 def desactivate_farms(switch):
+    #dash_logger.info('Farm switched off')
     return not switch, not switch
 
 @app.callback(
     Output('egg_toggle_output','children'),
-    Input('egg_toggle','on')
+    Input('egg_toggle','on'),
+    log=True
 )
-def toggle_egg_models(eggs):
+def toggle_egg_models(eggs, dash_logger: DashLogger):
+    dash_logger.info('Egg production model changed', autoClose=autocl)
     if eggs:
         return 'Stien (2005)'
     else:
@@ -840,11 +944,13 @@ def toggle_egg_models(eggs):
     Output('lice_store','data'),
     [Input('lice_knob','value'),
     Input('egg_toggle','on')],
-    Input('lice_meas_toggle','on')
+    Input('lice_meas_toggle','on'),
+    log=True
     )
-def compute_lice_data(liceC, egg, meas):
+def compute_lice_data(liceC, egg, meas, dash_logger: DashLogger):
     logger.info('scaling lice')
     logger.debug(f'egg is {egg}')
+    dash_logger.info('Lice data are being scaled', autoClose=autocl)
     # modify egg model from Rittenhouse (16.9) to Stein (30)
     if egg:
         # lices *= 30/16.9
@@ -858,7 +964,34 @@ def compute_lice_data(liceC, egg, meas):
             liceC=0.00001
         lice_factor*=liceC
     lice_factor *= c_lice
-    return json.dumps({'lice factor': lice_factor}, cls=NumpyEncoder)
+    return json.dumps({'lice factor': lice_factor, 
+                       'lice knob': liceC, 
+                       'egg factor': c_lice}, cls=NumpyEncoder)
+    
+@app.callback(
+    Output('view_store','data'),
+    Input('heatmap', 'relayoutData'),
+    log=True
+    )
+def store_viewport(relay, dash_logger: DashLogger):
+    dash_logger.info('Updating viewport data', autoClose=autocl)
+    logger.debug('Storing viewport data')
+    logger.debug(relay)
+    if relay is not None:
+        zoom=relay['mapbox.zoom']
+        bbox=relay['mapbox._derived']['coordinates']
+    else:
+        zoom=5.
+        bbox=[[-16., 60.], 
+            [5., 60.], 
+            [5., 53.], 
+            [-16., 53.]]
+    corners=calculate_edge(np.array(bbox))
+    #corners['bbox']=bbox
+    corners['zoom']=zoom
+    return json.dumps(corners)
+    
+        
 
 @app.callback(
     Output('bubbles','data'),
@@ -870,14 +1003,16 @@ def compute_lice_data(liceC, egg, meas):
     [
     State('lice_store','data'),
     State('lice_meas_toggle','on')
-    ]
+    ],
+    log=True
 )
-def mk_bubbles(year, biomC,lice_tst, lice_data, meas):
-    logger.info('making bubble')
+def mk_bubbles(year, biomC,lice_tst, lice_data, meas, dash_logger: DashLogger):
+    dash_logger.info('Scaling biomass according to chosen parameters', autoClose=autocl)
+    liceData=json.loads(lice_data)
     activated_farms= np.ones(len(All_names), dtype='bool')
     Coeff=np.ones(len(All_names)) 
     biomass_factor=np.ones(len(All_names))
-    lice_factor=np.ones(len(All_names))/2
+    lice_factor=liceData['lice factor']
     if biomC ==0:
         biomC=0.00001
     biomC /=100
@@ -887,7 +1022,7 @@ def mk_bubbles(year, biomC,lice_tst, lice_data, meas):
     # overwrite the computed lice... needs to change
     if not meas:
         lice_factor=np.asarray(json.loads(lice_data)['lice factor'])
-
+    dash_logger.info('Biomass and lice scaled', autoClose=autocl)
     name_list=np.array(list(farm_data.keys()))[idx]    
     ##### update discs farms
     current_biomass=[farm_data[farm]['reference biomass']*
@@ -902,53 +1037,74 @@ def mk_bubbles(year, biomC,lice_tst, lice_data, meas):
          'name list': name_list,
          'current biomass':current_biomass,
          'year': year,
+         'biomass knob':biomC,
+         'lice/egg factor':liceData['lice knob']*liceData['egg factor'],
          }, cls=NumpyEncoder)
      
 @app.callback(
     Output('LED_biomass','value'),
     Output('LED_egg','value'),
     Input('bubbles','modified_timestamp'),
-    State('bubbles','data')
+    State('bubbles','data'),
+    log=True
 )
-def populate_LED(bubble_tmst, bubble_data):
+def populate_LED(bubble_tmst, bubble_data, dash_logger: DashLogger):
     logger.info('modifying LED values')
+    dash_logger.info('Modifying LED values', autoClose=autocl)
     dataset= json.loads(bubble_data)
     return int(sum(dataset['coeff'])*1000), int(dataset['all lice'])
+    
+@app.callback(
+    Output('planned_store','data'),
+    Input('future_farms_toggle','on'),
+    Input('planned_checklist','value'),
+    Input('existing_farms_toggle','on'),
+    log=True
+)
+def store_planned_farms(toggle_planned, checklist, toggle_existing, dash_logger: DashLogger):
+    dash_logger.info('Storing selected planned farms', autoClose=autocl)
+    return json.dumps({'planned':toggle_planned, 'checklist':checklist, 'existing': toggle_existing})
+
 
 @app.callback(
     [Output('heatmap', 'figure'),
     Output('heatmap_output', 'children'),
     ],
     [
-    Input(ThemeSwitchAIO.ids.switch("theme"), "value"),
-    Input('power_streaming','on'),
-    Input('heatmap', 'relayoutData'),  
+    Input('theme_store', "data"),
+    Input('planned_store', 'data'),  
     Input('span-slider','value') ,
     Input('bubbles','modified_timestamp'),
+    Input('trigger','n_clicks')
     ],
     [  
     State('bubbles','data'),
-    State('power_streaming','on'),
     State('heatmap', 'figure'),
-    ]
+    State('view_store','data')   
+    ],
+    log=True
 )
-def redraw( toggle, power, relay, span, bubble_tmst, bubble_data, state_power, fig): 
-    ctx = dash.callback_context
+def redraw( toggle, plan_data, span, bubble_tmst, trigger, bubble_data,  fig, viewport, dash_logger: DashLogger): 
+    dash_logger.info('Updating the map', autoClose=autocl)
     logger.info('drawing the map')
-    # logger.debug(f'bubble data {bubble_data}')
+    ctx = dash.callback_context
+    logger.debug(ctx.triggered)
     dataset= json.loads(bubble_data)
-    logger.debug(f'power is {power}')
-    logger.debug(f'state_power is {state_power}')
+    viewdata= json.loads(viewport)
+    theme=json.loads(toggle)
+    plan=json.loads(plan_data)
+   
+    fig['layout']['template']=mk_template(theme['template'])
+    fig['layout']['mapbox']['style']=theme['carto_style']
+    fig['data'][0]['marker']['colorscale']=mk_colorscale(theme['cmp'])
+    fig['data'][0]['marker']['cmax']=span[1]
+    fig['data'][0]['marker']['cmin']=span[0]
+    logger.debug(fig['layout']['xaxis'])
     
-    ### toggle themes    
-    template = template_theme1 if toggle else template_theme2
-    cmp= cmp1 if toggle else cmp2
-    carto_style= carto_style1 if toggle else carto_style2
-    fig['layout']['template']=mk_template(template)
-    fig['layout']['mapbox']['style']=carto_style
-    
-    ### draw bubbles   
-    fig['data'][1]=go.Scattermapbox(
+    ### draw bubbles 
+    if ctx.triggered[0]['prop_id'] == 'bubbles.modified_timestamp':
+        dash_logger.info('Updating farm discs', autoClose=autocl)  
+        fig['data'][1]=go.Scattermapbox(
                                 lat=[farm_data[farm]['lat'] for farm in dataset['name list']],
                                 lon=[farm_data[farm]['lon'] for farm in dataset['name list']],
                                 text=dataset['name list'],
@@ -961,43 +1117,61 @@ def redraw( toggle, power, relay, span, bubble_tmst, bubble_data, state_power, f
                                     showscale=False,
                                     ),
                                 name=f"Processed with biomass of may {dataset['year']}")
+        dash_logger.info('Farm discs updated', autoClose=autocl)  
     
-    fig['data'][0]['marker']['colorscale']=mk_colorscale(cmp)
-    fig['data'][0]['marker']['cmax']=span[1]
-    fig['data'][0]['marker']['cmin']=span[0]
     ### update heatmap
-    if state_power : 
-            
-        #if idx.sum()>0:
+    if ctx.triggered[0]['prop_id'] == 'trigger.n_clicks' or \
+       ctx.triggered[0]['prop_id'] =='span-slider.value': 
+        if plan['existing'] or plan['planned']:
+            dash_logger.info('Updating the density map', autoClose=autocl)
             logger.info('rasterizing map')
             ####
             # remove Achintraid because only NaN for some reason
             idx[0]=False
-            ####
-
-            if relay is not None:
-                zoom=relay['mapbox.zoom']
+            ####        
+            r = select_zoom(viewdata['zoom'])
+            logger.debug('zoom: {}, resolution: {}'.format(viewdata['zoom'], r))
+            super_ds, planned_ds=global_store(r)
+            logger.info('global store loaded')
+            if plan['existing']:
+                ds= super_ds
+                name_list=dataset['name list']
+                ds=ds[name_list]
+                for i in range(len(name_list)):
+                    ds[name_list[i]].values *=dataset['coeff'][i]
+                if plan['planned']:
+                    name_list.append(plan['checklist'])
+                    for var in plan['checklist']:
+                        ds[var]=planned_ds[var]*dataset['lice/egg factor']
             else:
-                zoom=fig['layout']['mapbox']['zoom']
-            r = select_zoom(zoom)
-            logger.debug(f'zoom: {zoom}, resolution: {r}')
-            super_ds=global_store(r)
-            coordinates=get_coordinates(super_ds)
-
-            fig['layout']['mapbox']['layers']=[
-                                    {
+                if len(plan['checklist'])>0:
+                    ds=planned_ds[plan['checklist']]*dataset['lice/egg factor']
+                    name_list=plan['checklist']
+                else:
+                    dash_logger.warning('No farm choosen in the checklist')
+                    raise PreventUpdate
+            subds=ds.where((ds.x<viewdata['xmax'] ) &
+                           (ds.x>viewdata['xmin'] ) &
+                           (ds.y>viewdata['ymin'] ) &
+                           (ds.y<viewdata['ymax'] ))
+            coordinates=get_coordinates(ds)
+            logger.debug(subds)
+            logger.debug(name_list)
+            logger.debug(coordinates)
+            fig['layout']['mapbox']['layers']=[                                    {
                                         "below": 'traces',
                                         "sourcetype": "image",
-                                        "source": mk_img(super_ds, name_list, span, Coeff,cmp),
+                                        "source": mk_img(ds, span, theme['cmp']),
                                         "coordinates": coordinates
                                     },
                                     ]
-        #else:
-            # add a message?
+            logger.info('raster loaded')
+            dash_logger.info('Density map updated', autoClose=autocl)
+        else:
+            dash_logger.warning('Neither existing or planning farms are toggled on')
+            raise PreventUpdate
         #    fig['layout']['mapbox']['layers']=[]
-            relayed_zoom= zoom
-    ## led values
-    
+
     return fig, None
 
 
@@ -1017,13 +1191,6 @@ def farm_inspector(name, toggle):
         curves['layout']['template']=mk_template(template)
         return curves, mk_farm_layout(name, marks_biomass,marks_lice)
 
-@app.callback(
-    Output('power_streaming','on'),
-    Input('all_tabs', 'active_tab')
-)
-def update_control(tab):
-   if not tab =='tab-main':
-       return False
 
 if __name__ == '__main__':
     app.run_server(host='0.0.0.0', port=8050, debug=True)
