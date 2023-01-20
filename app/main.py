@@ -1154,14 +1154,14 @@ def redraw( toggle, plan_data, span, bubble_tmst, trigger, bubble_data,  fig, vi
                            (ds.x>viewdata['xmin'] ) &
                            (ds.y>viewdata['ymin'] ) &
                            (ds.y<viewdata['ymax'] ))
-            coordinates=get_coordinates(ds)
+            coordinates=get_coordinates(subds)
             logger.debug(subds)
             logger.debug(name_list)
             logger.debug(coordinates)
             fig['layout']['mapbox']['layers']=[                                    {
                                         "below": 'traces',
                                         "sourcetype": "image",
-                                        "source": mk_img(ds, span, theme['cmp']),
+                                        "source": mk_img(subds, span, theme['cmp']),
                                         "coordinates": coordinates
                                     },
                                     ]
