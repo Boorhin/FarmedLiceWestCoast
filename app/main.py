@@ -218,17 +218,17 @@ dbc_css = (
 
 
 ######### APP DEFINITION ############
+my_backend = FileSystemStore(cache_dir="/tmp")
 app = DashProxy(__name__,
                 external_stylesheets=[url_theme1],#, dbc_css
                 meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
-                transforms=[LogTransform(), ServersideOutputTransform()]
+                transforms=[LogTransform(), ServersideOutputTransform(backend=my_backend)]
                 )
 server=app.server
 cache = Cache(app.server, config={
     'CACHE_TYPE': 'filesystem',
     'CACHE_DIR': '/tmp'
 })
-my_backend = FileSystemStore(cache_dir="/tmp")
 timeout = 300
 
 @server.route('/_ah/warmup')
