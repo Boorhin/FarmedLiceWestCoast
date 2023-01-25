@@ -20,22 +20,22 @@ import rioxarray
 import json, logging
 #from google.cloud import storage
 import numpy as np
-from scipy.spatial import KDTree
+
 from pyproj import Proj
 # from random import random
 import datashader as DS
 import plotly.graph_objects as go
-#from plotly.supblots import make_subplots
+from plotly.subplots import make_subplots
 from colorcet import fire, bmy
 from datashader import transfer_functions as tf
 from datetime import datetime, timedelta
 import os.path
 import dash
-from dash import dcc as dcc
+# from dash import dcc as dcc
 from dash.exceptions import PreventUpdate
 #from dash import html as html
 # from dash.dependencies import Input, Output, State, MATCH, ALL
-from dash_extensions.enrich import Output, Input, html, State, MATCH, ALL, DashProxy, LogTransform, DashLogger
+from dash_extensions.enrich import Output, Input, html, State, MATCH, ALL, DashProxy, LogTransform, DashLogger, dcc, ServersideOutput, ServersideOutputTransform, FileSystemStore
 import dash_bootstrap_components as dbc
 from dash_bootstrap_templates import ThemeSwitchAIO, load_figure_template
 import dash_mantine_components as dmc
@@ -45,14 +45,17 @@ import dash_daq as daq
 from flask_caching import Cache
 from dash.exceptions import PreventUpdate
 
-
+from layout import *
+from preprocess import *
 
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
-        return json.JSONEncoder.default(self, obj)
-
+        #elif isinstance(obj, datetime):
+        #    return (str(obj))
+        else:
+            return json.JSONEncoder.default(self, obj)
 
 def get_coordinates(arr):
     logger.debug('compute corner coordinates of filtered dataset')
@@ -98,101 +101,10 @@ def mk_img(ds, span, cmp):
               ]]
             }]
     arr= arr.rio.write_crs(3857, inplace=True).rio.clip(polyg, invert=True, crs=3857)
-    logger.info('data cropped')
-    
+    logger.info('data cropped')  
     return tf.shade(arr.where(arr>0).load(),
                     cmap=cmp, how='linear',
                     span=span).to_pil()
-def add_new_SEPA_nb(sepafile):
-    '''
-    Add information from new SEPA GSID to modelled farms
-    '''
-    with open(sepafile) as ff:
-       ff.readline()
-       for line in ff:
-           line=line.strip().split(',')
-           try:
-               farm_data[line[0]]['GSID']=line[1]
-           except:
-               logger.debug(f'{line[0]} not found in farmdata')
-    return farm_data
-
-def read_farm_data(farmfile):
-    data={}
-    logger.info('########## READING BIOMASS DATA #######')
-    with open(farmfile) as f:
-        head=f.readline().strip().split(',')[21:]
-        times = np.array([datetime.strptime(h,'%m/%d/%Y') for h in head])
-        f.readline()
-        id=0
-        for line in f:   
-            line=line.strip().split(',')
-            data[line[0]]= {'additional location':line[1],
-                            'Name MS': line[2],
-                            'Site ID SEPA': line[3].strip(),
-                            'Site ID Scot env':str(line[4]).strip(),
-                            'lat':float(line[6]),'lon':float(line[7]),
-                            'Prod year':line[9],
-                            'licensed peak biomass':line[10],
-                            'operator':line[13],
-                            'production cycle':line[14],
-                            'production in 3 years 2021': line[18],
-                            'ID':id,
-                            #'odd':random() < 0.5,
-                            }
-            id+=1
-            ref=0
-            biom=np.zeros(len(line[21:]))
-            for i in range(len(line[21:])):
-                try:
-                    b = float(line[21+i])
-                    biom[i]=b
-                    if b>ref:
-                        ref=b
-                except:
-                    biom[i]=np.nan
-            data[line[0]]['reference biomass']= ref            
-            data[line[0]]['biomasses']=biom
-            data[line[0]]['lice data'], data[line[0]]['mean lice']=add_lice_data(line[4])       
-            if ref==0:
-                id -=1 
-                del data[line[0]]
-            #ref_biom[id]=ref
-    logger.info('########## BIOMASS DATA READ ###########')
-    logger.info('########## Making KDe Tree   ###########')
-    Xs= np.array([data[farm]['lon'] for farm in data.keys()])
-    Ys= np.array([data[farm]['lat'] for farm in data.keys()])
-    Ids=np.array([data[farm]['Site ID Scot env'] for farm in data.keys()])
-    tree = KDTree(np.vstack((Xs,Ys)).T)
-    logger.info('########## Tree Made ############')
-    return data, times, tree, Ids
-
-def read_future_farms(filename):
-    new_farm=np.genfromtxt(filename,
-                           names=True,
-                           delimiter='\t', 
-                           dtype=['U10','U30','i8','f8','f8'])
-    return new_farm
-
-def add_lice_data(SEPA_ID):
-    arr= np.empty(261)
-    arr[:]=np.nan
-    av=np.nan
-    for licence in lice_data.keys():
-        if licence==SEPA_ID:
-            arr=lice_data[licence].values
-            av = lice_data[licence].mean()
-    return arr, av
-
-def prepare_zarr():
-    # zoom 10 = 38.218 m so if zoom > 9 50m zarr then image is max 512 px
-    # should we fix the width to 1024? zarr needs 256 chunks to go faster probably
-    # first zoom 5.5 so compute for zoom 5 to 9 (5 zarrs) 50(9) - 100 (8) - 200 (7) - 400(6) - 800 (5)
-    ds=xr.open_zarr('westcoast_map_trim.zarr/')#.chunk(chunks={'x':256,'y':256})
-    for (res, zoom) in zip([50,100,200,400,800],[9,8,7,6,5]):
-        ds= ds.coarsen(x=2,boundary='pad').mean().coarsen(y=2,boundary='pad').mean()#.chunk(chunks={'x':256,'y':256})
-        ds.to_zarr(f'map_{res}m.zarr')#, safe_chunks=False)
-    return
 
 def select_zoom(zoom):
     '''
@@ -211,26 +123,7 @@ def select_zoom(zoom):
         r=100
     return r
     
-def search_lice_data(start,end, ident, farm):
-    '''
-    Search if there are data for the farm at the chosen date.
-    Check it is not null
-    return may data if available
-    if not, try to return the average lice value for the farm.
-    '''
-    if len(ident) >0:
-        may_data= lice_data[ident].sel(time=slice(start,end)).mean().values
-        if not np.isnan(may_data):
-            if may_data>0:
-                return may_data
-        else:
-            if np.isnan(farm_data[farm]['mean lice']) is False:
-                return farm_data[farm]['mean lice']
-    else:
-        logger.debug(f'No ID for farm {farm}')
-    
-    
-def fetch_biomass(activated_farms, biomass_factor, lice_factor, year=2021):
+def fetch_biomass(farm_data, lice_data, activated_farms, biomass_factor, lice_factor, tree, times, ref_biom, Ids, year=2021):
     '''
     Identify the biomass data for the month of may of the chosen year
     scale the data according to data
@@ -249,457 +142,18 @@ def fetch_biomass(activated_farms, biomass_factor, lice_factor, year=2021):
         else:
             biomass_factor[farm_data[farm]['ID']]=extract/farm_data[farm]['reference biomass']
             ref_biom[farm_data[farm]['ID']]=farm_data[farm]['reference biomass']
-            local_data=search_lice_data(start,end, farm_data[farm]['Site ID Scot env'], farm)
+            local_data=search_lice_data(start,end, farm_data[farm]['Site ID Scot env'], farm, lice_data, farm_data)
             if local_data is not None :
                 lice_factor[farm_data[farm]['ID']]=local_data
             else:
                 seek= tree.query(np.array([farm_data[farm]['lon'], farm_data[farm]['lat']]).T, n)[1]
                 for i in range(n):
-                    remote_data= search_lice_data(start,end, Ids[i], farm)
+                    remote_data= search_lice_data(start,end, Ids[i], farm, lice_data, farm_data)
                     if remote_data is not None :
                         lice_factor[farm_data[farm]['ID']]=remote_data
                         break
-    return activated_farms, biomass_factor, lice_factor, ref_biom
+    return activated_farms, biomass_factor, lice_factor, ref_biom      
 
-        
-#####################TAB 1 ###########################
-
-def make_base_figure(farm_data, center_lat, center_lon, span, cmp, template):
-    logger.info('Making figure ...')
-    fig= go.Figure()
-    fig.add_trace(go.Scatter(x=[None], y=[None],marker=go.scatter.Marker(
-                        colorscale=cmp,
-                        cmax=span[1],
-                        cmin=span[0],
-                        showscale=True,
-
-                        ),
-                    name='only_scale',
-                    showlegend=False),)
-    fig.add_trace(go.Scattermapbox(lat=[farm_data[farm]['lat'] for farm in name_list],
-                                lon=[farm_data[farm]['lon'] for farm in name_list],
-                                text=name_list,
-                                hovertemplate="<b>%{text}</b><br><br>" + \
-                                        "Biomass: %{marker.size:.0f} tons<br>",
-                                marker=dict(color='#62c462',
-                                    size=current_biomass,
-                                    sizemode='area',
-                                    sizeref=10,
-                                    showscale=False,
-                                    ),
-                                name=f'Processed with biomass of may 2021'))
-    fig.add_trace(go.Scattermapbox(
-                                lat=[farm_data[farm]['lat'] for farm in farm_data.keys()],
-                                lon=[farm_data[farm]['lon'] for farm in farm_data.keys()],
-                                text=[farm for farm in farm_data.keys()],
-                                marker=dict(color='#e9ecef', size=4, showscale=False),
-                                name='Mapped farms'))
-    fig.add_trace(go.Scattermapbox(
-                                lat=future_farms['Lat'],
-                                lon=future_farms['Lon'],
-                                text=future_farms['Name'],
-                                hovertemplate="<b>%{text}</b><br><br>" + \
-                                        "Biomass: %{marker.size:.0f} tons<br>",
-                                marker=dict(color='#00ccff',
-                                    size=future_farms['Biomass_tonnes'],
-                                    sizemode='area',
-                                    sizeref=10,
-                                    showscale=False,
-                                    ),
-                                name='Planned farms'))
-
-    fig.update_layout(
-                height=512,
-                width=1024,
-                hovermode='closest',
-                showlegend=False,
-                margin=dict(b=3, t=5),
-                template=template,
-                mapbox=dict(
-                    bearing=0,
-                    center=dict(
-                        lat=center_lat,
-                        lon=center_lon,
-                    ),
-                    pitch=0,
-                    zoom=5.5,
-                    style="carto-darkmatter",
-                    ))
-    logger.info('figure done.')
-    return fig
-
-def comment_card(start, end):
-   return dbc.Card(
-      dbc.CardBody([
-                dbc.Alert('The size of the disks is proportional to the biomass.', color='primary'),
-                dbc.Alert('Hover a farm for more information.', color='secondary'),
-                dbc.Alert('Colorscale is the average density of copepodid per sqm from {} to {}.'.format(start,end), color='primary'),
-                dbc.Alert('A density of 2 copepodid/sqm/day leads to a 30% mortality of wild smolts each day.', color='warning')
-            ])
-            )
-def legend_card():
-    return dbc.Card([
-                dbc.CardHeader('Legend'),
-                dbc.CardBody([
-                    html.Span([
-                dbc.Badge('Processed farms', color="success",pill=True),
-                # dbc.Badge('Farms awaiting processing', color='info',pill=True),
-                dbc.Badge('Farms included in the study', color='light', pill=True),
-                    ]),
-                ])
-            ])
-
-def tuning_card():
-    return dbc.Card([
-        dbc.CardHeader('Adjust biomass and lice infestation'),
-        dbc.CardBody([
-            dbc.Row([
-                dbc.Col([
-                    daq.Knob(
-                        id='biomass_knob',
-                        label='% Biomass',
-                        value=100,
-                        max=200,
-                        # min=0.1,
-                        scale={'start':0,'labelInterval':5,'interval':5},
-                        color='#f89406'
-                        )
-                    ]),
-                dbc.Col([
-                    daq.Knob(
-                        id='lice_knob',
-                        label='Lice per fish',
-                        value=0.5,
-                        min=0.25,
-                        max=8,
-                        scale={'start':0, 'labelInterval':10,'interval':0.05},
-                        color='#f89406'
-                        ),
-                    daq.BooleanSwitch(
-                         id='lice_meas_toggle',
-                         label='Use and extrapolate reported lice',
-                         on=False
-                         ),
-                    dbc.Tooltip('''Very little data are available on lice infestation. 
-                    This algorithm will first try to find if there are data in the May season you selected. 
-                    If there isn't it will try to make an average of recorded lice for the farm. 
-                    If the farm never reported lice counts then it will use the nearest farm that has data.''',
-                    target='lice_meas_toggle'
-                    )
-                    ]),
-                ])
-            ])
-        ])
-
-def mk_map_pres(): #
-    return dbc.Row([
-        dbc.Col([
-            dbc.Card([
-                dbc.CardHeader('Compute a new density map'),
-                dbc.CardBody([
-                    html.Div(
-                        [dbc.Button('Update density map',
-                            id='trigger', 
-                            n_clicks=0),],
-                        className="d-grid gap-2 d-md-flex justify-content-md-center",
-                        ),
-                    dbc.Tooltip('''
-                        This updates or creates the lice density map according to the parameter you have selected. 
-                        You can simulate a global change of the farm biomasses, the global lice infestation levels, 
-                        use the reported lice from the best data we have and scale the color range. 
-                        The map you produce will depend of the area visible in the map and the level of zoom. 
-                        The resolution available are 800-400-200-100-50 and will change automatically according 
-                        to the zoom in the viewport. If you change a parameter, you will have to press this button 
-                        to see the change. Be patient as this involves very heavy computations and can take a while to refresh. 
-                        ''',
-                        target = 'trigger'),
-                    ])
-                ]),
-            dbc.Card([
-                dbc.CardHeader('Select the contributors to the map'),
-                dbc.CardBody([
-                    daq.BooleanSwitch(id='existing_farms_toggle', 
-                        on=True,
-                        label='Existing farms'),
-                    dbc.Tooltip('Activate this toggle to visualise the lice density from existing farms',
-                        target='existing_farms_toggle'),
-                    daq.BooleanSwitch(id='future_farms_toggle',
-                        on=False,
-                        label='Planned farms'),
-                    dbc.Tooltip('''Activate this toggle to visualise the lice density from planned farms. 
-                                You also have to decide which of these farms to include in the dataset.''',
-                        target='future_farms_toggle'),
-                    ])
-                ]),
-            dbc.Card([
-                            dbc.CardHeader('Choose the egg production model'),
-                            dbc.CardBody(
-                                dbc.Row([
-                                    html.Div([
-                                    daq.BooleanSwitch(
-                                        id='egg_toggle',
-                                        on=True
-                                        ),
-                                    html.Div(
-                                        id='egg_toggle_output',
-                                        style={'text-align':'center'}
-                                        ),]),
-                                    dbc.Tooltip('''Choose which egg production model suits best. 
-                                                Rittenhouse et al. based on experimental data, 
-                                                produced an equation that suggested 16 eggs released per hour per adult copepodid. 
-                                                Stein 2005, based on model matching of real data suggest 30 eggs /hour.''', 
-                                        target= 'egg_toggle',
-                                        placement='bottom'),
-                                ])
-                            )
-                        ])
-        ],width=3),
-        dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader('Select the planned farms to include in the map'),
-                        dbc.CardBody([
-                            dcc.Checklist(
-                                id='planned_checklist',
-                                options=future_farms['Name'],
-                                inline=False,
-                                labelStyle={'display': 'block'},
-                                ),     
-                            ]),
-                        ]),
-            ],width=3),
-        dbc.Col([
-            tuning_card()
-        ],width=6),
-    ]),
-
-def tab1_layout(farm_data,center_lat, center_lon, span, cmp, template):
-    return dbc.Card([
-    dbc.CardHeader('Control dashboard'),
-    dbc.CardBody([
-        dbc.Card([
-            dbc.CardBody(mk_map_pres())
-        ]),
-        dbc.Card([
-            dbc.CardBody([
-            dbc.Row([
-                dbc.Col([
-                    dcc.Graph(
-                        id='heatmap',
-                        figure=make_base_figure(farm_data, center_lat, 
-                                   center_lon, span, cmp, template)
-                        ),
-                    dcc.Loading(
-                        id='figure_loading',
-                        children=[html.Div(id='heatmap_output'),],
-                        type='graph',
-                        fullscreen=True
-                        ),
-                    ], width=10),
-                dbc.Col([
-                    html.P(
-                                children='(copepodid/sqm/day)',
-                                style={'writing-mode':'vertical-rl'},
-                                ),
-                    ], width=1),
-                dbc.Col([
-                     html.P('Scale range'),
-                     dcc.RangeSlider(
-                                id='span-slider',
-                                min=0,
-                                max=10,
-                                step=0.25,
-                                marks={n:'%s' %n for n in range(11)},
-                                value=[0,0.75],
-                                vertical=True,
-                                )
-                    ], width=1)
-                ], align='center', className="g-0")
-            ])
-        ]),
-        dbc.Card([
-            dbc.CardHeader('Production year'),
-            dbc.CardBody([
-                dbc.Row([
-                    html.P('Choose the year of production'),
-                    dcc.Slider(
-                                id='year_slider',
-                                step=1,
-                                min=2004,
-                                max=2021,
-                                marks={
-                                       2005:'2005',
-                                       2007:'2007',
-                                       2009:'2009',
-                                       2011:'2011',
-                                       2013:'2013',
-                                       2015:'2015',
-                                       2017:'2017',
-                                       2019:'2019',
-                                       2021:'2021'},
-                                value=2021,
-                                tooltip={"placement": "bottom"}),
-                ]),
-                dbc.Row([
-                    dbc.Col([
-                        daq.LEDDisplay(
-                            id='LED_biomass',
-                            label='Total fish farmed in may (tons)',
-                            color='#f89406',
-                            backgroundColor='#7a8288',
-                            ),
-                        ]),
-                    dbc.Col([
-                        daq.LEDDisplay(
-                            id='LED_egg',
-                            label='Daily release of sealice nauplii from fish farms',
-                            color='#f89406',
-                            backgroundColor='#7a8288',
-                            ), 
-                        ]),
-                    ]),
-                ]),
-            ]),
-        ]),
-    ])
-    #])
-
-################# tab2 ###########################3
-
-
-def tab2_layout(farm_data, marks_biomass,marks_lice):
-
-    layout= dbc.Card([
-    ])
-    return layout
-
-################### TAB 3 #########################
-
-
-def mk_farm_evo(name, times):    
-    '''
-    Plot individual farm biomass
-    '''   
-    fig_p=go.Figure()
-    fig_p.add_trace(go.Scatter(
-           x= times,
-           y= farm_data[name]['biomasses'],
-           mode='lines+markers',
-           name='Biomass',
-           yaxis='y1',
-       ))
-
-    fig_p.add_trace(go.Scatter(
-        x=lice_data.time,
-        y=farm_data[name]['lice data'],
-        mode='lines+markers',
-        name='lice count',
-        yaxis='y2',
-        ))
-    fig_p.add_shape(type='line', xref='paper', 
-        x0=0, y0=0.5, x1=1, y1=0.5,
-        line=dict(color='#f89406', dash='dash'),
-        name='modelled lice infestation',
-        yref='y2'
-        )
-    if not np.isnan(farm_data[name]['mean lice']):
-        fig_p.add_shape(type='line', xref='paper', 
-            x0=0, y0=float(farm_data[name]['mean lice']), x1=1, y1=float(farm_data[name]['mean lice']),
-            line=dict(color='firebrick', dash='dash'),
-            name='Average lice infestation',
-            yref='y2'
-            )   
-    for y in range(2003,2022):
-        fig_p.add_vline(x=datetime(year=y, month=5, day=1), line=dict(color='green', dash='dash'))
-    fig_p.update_layout(
-        yaxis= dict(title='Recorded fish farmbiomass (tons)',
-                    showgrid=False ),
-        yaxis2=dict(title='Reported average lice/fish',
-                     overlaying='y', 
-                     side='right',
-                     showgrid=False ),
-        margin=dict(b=15, l=15, r=5, t=5),
-    )
-    return fig_p
-    
-def togglingyears():
-    p='Production year '
-    if farm_data[name]['Prod year'] == 'ODD':
-        p+='odd'
-        s=True
-    elif farm_data[name]['Prod year'] == 'EVEN':
-        p+= 'even'
-        s= False
-    else:
-        p+= farm_data[name]['Prod year']
-        s= random() < 0.5,
-    
-def mk_farm_layout(name, marks_biomass,marks_lice):
-    farm_lay= [dbc.Col([
-    		    dbc.Row(
-                	daq.BooleanSwitch(
-                 	   id={'type':'switch','id':farm_data[name]['ID']},
-                	    on=True,
-                	    label="Toggle farm on/off",
-                	    labelPosition="top"
-                	    )),
-
-              	     dbc.Row([
-              	          html.P('Site identification number (GSID): '+farm_data[name]['GSID']),
-              	          html.P('SEPA Reference: ' + farm_data[name]['Site ID SEPA']),
-              	          html.P('Marine Scotland Reference: ' + farm_data[name]['Site ID Scot env']),
-              	          html.P('Marine Scotland site name: ' + farm_data[name]['Name MS']),
-              	          #html.P('Production Year: '+ farm_data[name]['Prod year']),
-              	          html.P('Operator: ' + farm_data[name]['operator']),
-              	          ]),
-                   ], width=3),
-            dbc.Col([
-                html.H3('Modelled Peak Biomass {} tons'.format(farm_data[name]['reference biomass'])),
-                html.H3('Average lice per fish {}'.format(np.round(farm_data[name]['mean lice'],2))),
-                html.H3('Tune Farm biomass: (DESACTIVATED)'),
-                dcc.Slider(
-                    id={'type':'biomass_slider','id':farm_data[name]['ID']},
-                    step=0.05,
-                    marks=marks_biomass,
-                    value=1,
-                    included=False,
-                    tooltip={"placement": "bottom"},
-                    disabled=True,
-                    ),
-                html.H3('Tune lice infestation: (DESACTIVATED)'),
-                html.P('Unit is lice/fish'),
-                dcc.Slider(
-                    id={'type':'lice_slider','id':farm_data[name]['ID']},
-                    step=0.05,
-                    marks=marks_lice,
-                    value=0.5,
-                    included=False,
-                    tooltip={"placement": "bottom"},
-                    disabled=True,
-                    )],
-            width=8)]
-    return farm_lay
-    
-def tab3_layout(All_names):
-    return dbc.Card([
-    dbc.CardHeader('Individual farm detail'),
-    dbc.CardBody([
-        dbc.Row([
-            dcc.Dropdown(
-            	id='dropdown_farms',
-            	options=All_names,
-            	searchable=True,
-            	placeholder='Select a fish farm',
-            ),
-            dcc.Graph(
-                id='progress-curves',
-            ),    
-        ]),
-        dbc.Row(
-            id='farm_layout',
-            children=[]),
-        
-    ])
-])
 
 #### SET LOGGER #####
 logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S')
@@ -707,17 +161,10 @@ logger = logging.getLogger('sealice_logger')
 logger.setLevel(logging.DEBUG)
 autocl=2000 #time to close notification
 
-#logger.setLevel(logging.DEBUG) #future use env variable
-#handler= logging.FileHandler('mylog.log')
-#formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-#handler.setFormatter(formatter)
-# logger.addHandler(handler)
-
 ############# VARIABLES ##########################33
-span=[0,0.75] # value extent
+ # value extent
 resolution=[50,100,200,400,800]
 zooms=[9,8,7,6,5]
-center_lat,center_lon=57.1, -6.4
 start, end = "2018-05-01", "2018-05-31"
 marks_biomass={
         0.1:'10%',
@@ -743,6 +190,7 @@ marks_lice={
         7:'7',
         8:'8'
     }
+    
 p=Proj("epsg:3857", preserve_units=False)
 
 
@@ -754,57 +202,7 @@ else:
     rootdir='/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'
 
 
-if 'All_names' not in globals():
-    logger.info('loading dataset')
-    master='westcoast_map_trim.zarr' #needs to go in the share drive
-    super_ds=open_zarr(rootdir+master).drop('North Kilbrannan')  
-    All_names=np.array(list(super_ds.keys()))
-    ## remove border effects
-    super_ds= super_ds.where(super_ds.x<-509600)
-    future_farms=read_future_farms(rootdir+'future_farms.txt')
-
-
-ref_biom=np.zeros(len(All_names))
     
-if 'lice_data' not in globals():
-    liceStore='consolidated_sealice_data_2017-2021.zarr'
-    lice_data=open_zarr(rootdir+liceStore)
-    ### mess in raw data
-    id_c=250
-    typos =['Fs0860', 'Fs1018', 'Fs1024'] #, 'FS1287 '
-    correct=['FS0860', 'FS1018', 'FS1024']
-    for mess, ok in zip(typos, correct):
-        lice_data[ok].values[id_c]=lice_data[mess].values[id_c]
-        lice_data=lice_data.drop(mess)
-    
-    
-if 'farm_data' not in globals():
-    csvfile='biomasses.csv'
-    farm_data, times, tree, Ids =read_farm_data(rootdir+csvfile)
-    logger.info('Farm loaded')
-    sepacsv= 'SEPA_GSID.csv'
-    farm_data=add_new_SEPA_nb(rootdir+sepacsv)
-    
-
-###########  manage themes ###############
-
-def mk_colorscale(cmp):
-    '''
-    format the colorscale for update in the callback
-    '''
-    idx =np.linspace(0,1,len(cmp))
-    return np.vstack((idx, np.array(cmp))).T
-
-def mk_template(template):
-    '''
-    Format the template for update in the callback
-    '''
-    fig=go.Figure()
-    fig.update_layout(template=template)
-    return fig['layout']['template']
-    
-
-
 template_theme1 = "slate"
 template_theme2 = "sandstone"
 load_figure_template([template_theme1,template_theme2])
@@ -818,36 +216,19 @@ dbc_css = (
     "https://cdn.jsdelivr.net/gh/AnnMarieW/dash-bootstrap-templates@V1.0.1/dbc.min.css"
 )
 
-############# initialise variables before first callback to use context #############
-template = template_theme1 
-cmp= cmp1
-carto_style= carto_style1
-activated_farms= np.ones(len(All_names), dtype='bool')
-Coeff=np.ones(len(All_names)) 
-biomass_factor=np.ones(len(All_names))
-lice_factor=np.ones(len(All_names))/2
-idx, biomass_factor, lice_factor, ref_biom=fetch_biomass(activated_farms, 
-                                                     biomass_factor, lice_factor, 2021)
-name_list=np.array(list(farm_data.keys()))[idx] 
-current_biomass=[farm_data[farm]['reference biomass']*
-                                           biomass_factor[farm_data[farm]['ID']]
-                                           for farm in name_list]
-Coeff=30/16.9*biomass_factor[idx]*lice_factor[idx]
-alllice=(Coeff*ref_biom[idx]).sum()*4.5*1000
-
-
 
 ######### APP DEFINITION ############
 app = DashProxy(__name__,
                 external_stylesheets=[url_theme1],#, dbc_css
                 meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
-                transforms=[LogTransform()]
+                transforms=[LogTransform(), ServersideOutputTransform()]
                 )
 server=app.server
 cache = Cache(app.server, config={
     'CACHE_TYPE': 'filesystem',
     'CACHE_DIR': '/tmp'
 })
+my_backend = FileSystemStore(cache_dir="/tmp")
 timeout = 300
 
 @server.route('/_ah/warmup')
@@ -861,11 +242,13 @@ app.title="Heatmap Dashboard"
 app.layout = dbc.Container([
     #Store
     html.Div([
+        dcc.Store(id='init', storage_type='session'),
         dcc.Store(id='bubbles', storage_type='session'),
         dcc.Store(id='lice_store', storage_type='session'),
         dcc.Store(id='view_store', storage_type='session'),
         dcc.Store(id='theme_store', storage_type='session'),
         dcc.Store(id='planned_store', storage_type='session'),
+        dcc.Store(id='fig_store', storage_type='session'),
         
     #header
         html.Div([ 
@@ -883,9 +266,9 @@ app.layout = dbc.Container([
         html.Div([
             dbc.Tabs(id='all_tabs',
                 children= [
-                dbc.Tab(tab1_layout(farm_data,center_lat, center_lon, span, cmp1, template_theme1),label='Interactive map',tab_id='tab-main',),
+                dbc.Tab(tab1_layout(),label='Interactive map',tab_id='tab-main',),
                 #dbc.Tab(tab2_layout(farm_data, marks_biomass,marks_lice),label='Tuning dashboard',tab_id='tab-tunning',),
-                dbc.Tab(tab3_layout(All_names),label='Farm data inspection',tab_id='tab-graph',),
+                dbc.Tab(tab3_layout(),label='Farm data inspection',tab_id='tab-graph',),
                 #dbc.Tab(tab4_layout(farm_data), label='All farms toggles', tab_id='tab-toggle'),
                 ])
             ])
@@ -903,6 +286,38 @@ def global_store(r):
     ## remove border effects
     super_ds= super_ds.where(super_ds.x<-509600)   
     return super_ds, planned_ds
+    
+@app.callback(
+     ServersideOutput('init', 'data'),
+     Input(ThemeSwitchAIO.ids.switch("theme"), "value"),
+     log = True
+)
+def initialise_var(toggle, dash_logger: DashLogger):
+    logger.info('Preparing dataset')
+    variables={}
+    dash_logger.info('Initialising ...', autoClose=autocl)
+    master='curr_800m.zarr'
+    super_ds=open_zarr(rootdir+master)
+    variables['All_names']=np.array(list(super_ds.keys()))
+    variables['future_farms']=read_future_farms(rootdir+'future_farms.txt')
+    variables['ref_biom']=np.zeros(len(variables['All_names']))
+    liceStore='consolidated_sealice_data_2017-2021.zarr'
+    lice_data=open_zarr(rootdir+liceStore)
+    ### Correct typos in the raw data
+    id_c=250
+    typos =['Fs0860', 'Fs1018', 'Fs1024'] 
+    correct=['FS0860', 'FS1018', 'FS1024']
+    for mess, ok in zip(typos, correct):
+        lice_data[ok].values[id_c]=lice_data[mess].values[id_c]
+        lice_data=lice_data.drop(mess)
+    variables['lice_data']=lice_data
+    csvfile='biomasses.csv'
+    variables['farm_data'], variables['times'], variables['tree'], variables['Ids'] =read_farm_data(rootdir+csvfile, lice_data)
+    logger.info('Farm loaded')
+    sepacsv= 'SEPA_GSID.csv'
+    variables['farm_data']=add_new_SEPA_nb(rootdir+sepacsv, variables['farm_data'])
+    logger.info('Variables loaded')
+    return [variables]
 
 @app.callback(
     Output('theme_store', 'data'),
@@ -919,16 +334,6 @@ def record_theme(toggle, dash_logger: DashLogger):
     return json.dumps(theme)
 
 @app.callback(
-    [Output({'type':'biomass_slider', 'id':MATCH}, 'disabled'),
-    Output({'type':'lice_slider', 'id':MATCH}, 'disabled')],
-    Input({'type':'switch', 'id':MATCH},'on'),
-    #log=True
-)
-def desactivate_farms(switch):
-    #dash_logger.info('Farm switched off')
-    return not switch, not switch
-
-@app.callback(
     Output('egg_toggle_output','children'),
     Input('egg_toggle','on'),
     log=True
@@ -941,32 +346,34 @@ def toggle_egg_models(eggs, dash_logger: DashLogger):
         return 'Rittenhouse et al. (2016)'
 
 @app.callback(
-    Output('lice_store','data'),
+    ServersideOutput('lice_store','data'),
     [Input('lice_knob','value'),
-    Input('egg_toggle','on')],
+    Input('egg_toggle','on'),
     Input('lice_meas_toggle','on'),
+    Input('init','data'),],
     log=True
     )
-def compute_lice_data(liceC, egg, meas, dash_logger: DashLogger):
+def compute_lice_data(liceC, egg, meas, variables, dash_logger: DashLogger):
     logger.info('scaling lice')
     logger.debug(f'egg is {egg}')
     dash_logger.info('Lice data are being scaled', autoClose=autocl)
+    variables=variables[0]
     # modify egg model from Rittenhouse (16.9) to Stein (30)
     if egg:
         # lices *= 30/16.9
         c_lice=30/16.9
     else:
         c_lice=1
-    lice_factor=np.ones(len(All_names))/2
+    lice_factor=np.ones(len(variables['All_names']))/2
     if not meas:
         liceC *=2
         if liceC==0:
             liceC=0.00001
         lice_factor*=liceC
     lice_factor *= c_lice
-    return json.dumps({'lice factor': lice_factor, 
+    return [{'lice factor': lice_factor, 
                        'lice knob': liceC, 
-                       'egg factor': c_lice}, cls=NumpyEncoder)
+                       'egg factor': c_lice}]
     
 @app.callback(
     Output('view_store','data'),
@@ -976,7 +383,7 @@ def compute_lice_data(liceC, egg, meas, dash_logger: DashLogger):
 def store_viewport(relay, dash_logger: DashLogger):
     dash_logger.info('Updating viewport data', autoClose=autocl)
     logger.debug('Storing viewport data')
-    logger.debug(relay)
+    logger.debug(f'relay:    {relay}')
     if relay is not None:
         zoom=relay['mapbox.zoom']
         bbox=relay['mapbox._derived']['coordinates']
@@ -998,36 +405,41 @@ def store_viewport(relay, dash_logger: DashLogger):
     [
     Input('year_slider','value'),
     Input('biomass_knob','value'),
-    Input('lice_store','modified_timestamp'),    
+    Input('lice_store','modified_timestamp'), 
+    Input('init', 'data'), 
+    Input('lice_store','data'),  
     ],
-    [
-    State('lice_store','data'),
+    [   
     State('lice_meas_toggle','on')
     ],
     log=True
 )
-def mk_bubbles(year, biomC,lice_tst, lice_data, meas, dash_logger: DashLogger):
-    dash_logger.info('Scaling biomass according to chosen parameters', autoClose=autocl)
-    liceData=json.loads(lice_data)
-    activated_farms= np.ones(len(All_names), dtype='bool')
-    Coeff=np.ones(len(All_names)) 
-    biomass_factor=np.ones(len(All_names))
+def mk_bubbles(year, biomC,lice_tst, variables, liceData, meas, dash_logger: DashLogger):
+    dash_logger.info('Scaled biomass according to chosen parameters', autoClose=autocl)
+    #liceData=json.loads(lice_data)
+    #variables=json.loads(init)
+    liceData=liceData[0]
+    variables=variables[0]
+    activated_farms= np.ones(len(variables['All_names']), dtype='bool')
+    Coeff=np.ones(len(variables['All_names'])) 
+    biomass_factor=np.ones(len(variables['All_names']))
     lice_factor=liceData['lice factor']
     if biomC ==0:
         biomC=0.00001
     biomC /=100
     logger.info('preparing lice factor')
-    idx, biomass_factor, lice_factor, ref_biom=fetch_biomass(activated_farms, 
-                                                     biomass_factor, lice_factor, year)
+    idx, biomass_factor, lice_factor, ref_biom=fetch_biomass(variables['farm_data'], variables['lice_data'], 
+                                                     activated_farms, biomass_factor, lice_factor, variables['tree'], 
+                                                     variables['times'], variables['ref_biom'], variables['Ids'], year)
     # overwrite the computed lice... needs to change
     if not meas:
-        lice_factor=np.asarray(json.loads(lice_data)['lice factor'])
-    dash_logger.info('Biomass and lice scaled', autoClose=autocl)
-    name_list=np.array(list(farm_data.keys()))[idx]    
+        lice_factor=liceData['lice factor']
+    #dash_logger.info('Biomass and lice scaled', autoClose=autocl)
+    name_list=np.array(list(variables['farm_data'].keys()))[idx]    
     ##### update discs farms
-    current_biomass=[farm_data[farm]['reference biomass']*
-                                           biomass_factor[farm_data[farm]['ID']] *biomC
-                                           for farm in name_list]
+    current_biomass=[variables['farm_data'][farm]['reference biomass']*
+                                    biomass_factor[variables['farm_data'][farm]['ID']] *biomC
+                                    for farm in name_list]
         # set global factor biomass x individual farm biom x individual lice x egg model
     Coeff=biomC*biomass_factor[idx]*lice_factor[idx]
     alllice=(Coeff*ref_biom[idx]).sum()*4.5*1000
@@ -1042,20 +454,20 @@ def mk_bubbles(year, biomC,lice_tst, lice_data, meas, dash_logger: DashLogger):
          }, cls=NumpyEncoder)
      
 @app.callback(
-    Output('LED_biomass','value'),
-    Output('LED_egg','value'),
-    Input('bubbles','modified_timestamp'),
-    State('bubbles','data'),
+    [Output('LED_biomass','value'),
+    Output('LED_egg','value')],
+    #Input('bubbles','modified_timestamp'),
+    Input('bubbles','data'),
     log=True
 )
-def populate_LED(bubble_tmst, bubble_data, dash_logger: DashLogger):
+def populate_LED(bubble_data, dash_logger: DashLogger):
     logger.info('modifying LED values')
     dash_logger.info('Modifying LED values', autoClose=autocl)
     dataset= json.loads(bubble_data)
     return int(sum(dataset['coeff'])*1000), int(dataset['all lice'])
     
 @app.callback(
-    Output('planned_store','data'),
+    ServersideOutput('planned_store','data'),
     Input('future_farms_toggle','on'),
     Input('planned_checklist','value'),
     Input('existing_farms_toggle','on'),
@@ -1063,7 +475,15 @@ def populate_LED(bubble_tmst, bubble_data, dash_logger: DashLogger):
 )
 def store_planned_farms(toggle_planned, checklist, toggle_existing, dash_logger: DashLogger):
     dash_logger.info('Storing selected planned farms', autoClose=autocl)
-    return json.dumps({'planned':toggle_planned, 'checklist':checklist, 'existing': toggle_existing})
+    return [{'planned':toggle_planned, 'checklist':checklist, 'existing': toggle_existing}]
+
+@app.callback(
+    Output('planned_checklist','options'),
+    Input('init','data')
+    )
+def init_checklist(variables):
+    logger.info('generating checklist')
+    return variables[0]['future_farms']['Name']
 
 
 @app.callback(
@@ -1071,42 +491,59 @@ def store_planned_farms(toggle_planned, checklist, toggle_existing, dash_logger:
     Output('heatmap_output', 'children'),
     ],
     [
-    Input('theme_store', "data"),
+    Input('theme_store',"data"),
     Input('planned_store', 'data'),  
     Input('span-slider','value') ,
-    Input('bubbles','modified_timestamp'),
-    Input('trigger','n_clicks')
+    #Input('bubbles','modified_timestamp'),
+    Input('trigger','n_clicks'),
+    Input('init','data'),  
+    Input('bubbles','data'),  
     ],
     [  
-    State('bubbles','data'),
-    State('heatmap', 'figure'),
+    State('heatmap','figure'),
+    
+    #State('heatmap', 'figure'),
     State('view_store','data')   
     ],
     log=True
 )
-def redraw( toggle, plan_data, span, bubble_tmst, trigger, bubble_data,  fig, viewport, dash_logger: DashLogger): 
+def redraw( theme, plan, span, trigger, variables, bubble_data,  fig,  viewport, dash_logger: DashLogger): #, bubble_tmst
     dash_logger.info('Updating the map', autoClose=autocl)
     logger.info('drawing the map')
+    # logger.debug(f'figure:     {fig}')
     ctx = dash.callback_context
-    logger.debug(ctx.triggered)
+    variables=variables[0]
+    #dataset=dataset[0]
+    #viewdata=viewdata[0]
+    #theme=theme[0]
+    plan=plan[0]
+    # logger.debug(ctx.triggered)
     dataset= json.loads(bubble_data)
     viewdata= json.loads(viewport)
-    theme=json.loads(toggle)
-    plan=json.loads(plan_data)
-   
+    theme=json.loads(theme)
+    # plan=json.loads(plan_data)
+    # variables=json.loads(init)
+    # fig=json.loads(fig_data)
+    
     fig['layout']['template']=mk_template(theme['template'])
     fig['layout']['mapbox']['style']=theme['carto_style']
-    fig['data'][0]['marker']['colorscale']=mk_colorscale(theme['cmp'])
+    fig['data'][0]['marker']['colorscale']=mk_colorscale(theme['cmp']) #mk_colorscale(theme['cmp'])
     fig['data'][0]['marker']['cmax']=span[1]
     fig['data'][0]['marker']['cmin']=span[0]
-    logger.debug(fig['layout']['xaxis'])
+    fig['data'][2]['lat']=[variables['farm_data'][farm]['lat'] for farm in variables['farm_data'].keys()]
+    fig['data'][2]['lon']=[variables['farm_data'][farm]['lon'] for farm in variables['farm_data'].keys()]
+    fig['data'][2]['text']=[farm for farm in variables['farm_data'].keys()]
+    fig['data'][3]['lat']=variables['future_farms']['Lat']
+    fig['data'][3]['lon']=variables['future_farms']['Lon']
+    fig['data'][3]['text']=variables['future_farms']['Name']
+    fig['data'][3]['marker']['size']=variables['future_farms']['Biomass_tonnes']
     
     ### draw bubbles 
-    if ctx.triggered[0]['prop_id'] == 'bubbles.modified_timestamp':
-        dash_logger.info('Updating farm discs', autoClose=autocl)  
-        fig['data'][1]=go.Scattermapbox(
-                                lat=[farm_data[farm]['lat'] for farm in dataset['name list']],
-                                lon=[farm_data[farm]['lon'] for farm in dataset['name list']],
+    #if ctx.triggered[0]['prop_id'] == 'bubbles.data':
+    dash_logger.info('Updating farm discs', autoClose=autocl)  
+    fig['data'][1]=go.Scattermapbox(
+                                lat=[variables['farm_data'][farm]['lat'] for farm in dataset['name list']],
+                                lon=[variables['farm_data'][farm]['lon'] for farm in dataset['name list']],
                                 text=dataset['name list'],
                                 hovertemplate="<b>%{text}</b><br><br>" + \
                                         "Biomass: %{marker.size:.0f} tons<br>",
@@ -1117,7 +554,19 @@ def redraw( toggle, plan_data, span, bubble_tmst, trigger, bubble_data,  fig, vi
                                     showscale=False,
                                     ),
                                 name=f"Processed with biomass of may {dataset['year']}")
-        dash_logger.info('Farm discs updated', autoClose=autocl)  
+    fig['data'][1]['lat']=[variables['farm_data'][farm]['lat'] for farm in dataset['name list']]
+    fig['data'][1]['lon']=[variables['farm_data'][farm]['lon'] for farm in dataset['name list']]
+    fig['data'][1]['text']=dataset['name list']
+    fig['data'][1]['hovertemplate']="<b>%{text}</b><br><br>" + "Biomass: %{marker.size:.0f} tons<br>"
+    fig['data'][1]['marker']=dict(color='#62c462',
+                                    size=dataset['current biomass'],
+                                    sizemode='area',
+                                    sizeref=10,
+                                    showscale=False,
+                                    )
+    fig['data'][1]['name']=f"Processed with biomass of may {dataset['year']}"                        
+        
+    dash_logger.info('Farm discs updated', autoClose=autocl)  
     
     ### update heatmap
     if ctx.triggered[0]['prop_id'] == 'trigger.n_clicks' or \
@@ -1125,22 +574,19 @@ def redraw( toggle, plan_data, span, bubble_tmst, trigger, bubble_data,  fig, vi
         if plan['existing'] or plan['planned']:
             dash_logger.info('Updating the density map', autoClose=autocl)
             logger.info('rasterizing map')
-            ####
-            # remove Achintraid because only NaN for some reason
-            idx[0]=False
-            ####        
             r = select_zoom(viewdata['zoom'])
             logger.debug('zoom: {}, resolution: {}'.format(viewdata['zoom'], r))
             super_ds, planned_ds=global_store(r)
             logger.info('global store loaded')
             if plan['existing']:
                 ds= super_ds
-                name_list=dataset['name list']
+                name_list=dataset['name list'][1:] #### remove Achintraid because only NaN for some reason
+                logger.debug(f'name list:    {name_list}')
                 ds=ds[name_list]
                 for i in range(len(name_list)):
                     ds[name_list[i]].values *=dataset['coeff'][i]
                 if plan['planned']:
-                    name_list.append(plan['checklist'])
+                    name_list=np.hstack((name_list,plan['checklist']))
                     for var in plan['checklist']:
                         ds[var]=planned_ds[var]*dataset['lice/egg factor']
             else:
@@ -1155,16 +601,15 @@ def redraw( toggle, plan_data, span, bubble_tmst, trigger, bubble_data,  fig, vi
                            (ds.y>viewdata['ymin'] ) &
                            (ds.y<viewdata['ymax'] ))
             coordinates=get_coordinates(subds)
-            logger.debug(subds)
-            logger.debug(name_list)
-            logger.debug(coordinates)
-            fig['layout']['mapbox']['layers']=[                                    {
+            logger.debug(f'subds:      {subds}')
+            logger.debug(f'name_list:   {name_list}')
+            logger.debug(f'coordinates:     {coordinates}')
+            fig['layout']['mapbox']['layers']=[{
                                         "below": 'traces',
                                         "sourcetype": "image",
                                         "source": mk_img(subds, span, theme['cmp']),
                                         "coordinates": coordinates
-                                    },
-                                    ]
+                                    },]
             logger.info('raster loaded')
             dash_logger.info('Density map updated', autoClose=autocl)
         else:
@@ -1174,23 +619,53 @@ def redraw( toggle, plan_data, span, bubble_tmst, trigger, bubble_data,  fig, vi
 
     return fig, None
 
+@app.callback(
+    Output('dropdown_farms', 'options'),
+    Input('init', 'data')
+)
+def populate_dropdown(variables):
+    logger.info('populating farm dropdown')
+    variables=variables[0]
+    return variables['All_names']
+
 
 @app.callback([
     Output('progress-curves','figure'),
     Output('farm_layout','children'),
 ],
-    Input(   'dropdown_farms', 'value',),
-    State(ThemeSwitchAIO.ids.switch("theme"), "value"),
+    Input('dropdown_farms', 'value'),
+    Input('theme_store', "data"),
+    Input('init','data'),
+    State('progress-curves','figure'),
+    log= True
 )
-def farm_inspector(name, toggle):
-    template = template_theme1 if toggle else template_theme2
+def farm_inspector(name, theme, init, curves, dash_logger: DashLogger):
+    #theme=theme[0]
+    theme=json.loads(theme)
+    variables=init[0]
+    template = theme['template']    
+    logger.debug(f'curve name: {name}')  
+    time_range=   np.array([variables['times'][0],variables['lice_data'].time.values[-1]], dtype='datetime64[D]')#convert_dates()
     if not name:
+        dash_logger.warning('No farm selected', autoClose=autocl)
         raise PreventUpdate
     else:
-        curves=mk_farm_evo(name, times)
+        dash_logger.info(f'Computing curve for {name}', autoClose=autocl)
+        for i in range(4): # try to 0 de values
+            curves['data'][i]['x']=[None]
+            curves['data'][i]['y']=[None]
+        curves['data'][0]['x']=variables['times'].astype('datetime64[D]')
+        curves['data'][0]['y']=variables['farm_data'][name]['biomasses']
+        curves['data'][1]['x']=variables['lice_data'].time.values.astype('datetime64[D]')
+        curves['data'][1]['y']=variables['farm_data'][name]['lice data']
+        curves['data'][2]['y']=[0.5,0.5]
+        curves['data'][2]['x']= time_range 
+        curves['data'][3]['x']= time_range 
+        curves['data'][3]['y']=[variables['farm_data'][name]['mean lice'].values, variables['farm_data'][name]['mean lice'].values]      
+        #curves=farm_plot(name, variables['times'], variables['farm_data'][name], variables['lice_data'], template)
         curves['layout']['template']=mk_template(template)
-        return curves, mk_farm_layout(name, marks_biomass,marks_lice)
-
+        logger.debug(curves)
+        return curves, mk_farm_layout(name, marks_biomass,marks_lice, variables['farm_data'][name])
 
 if __name__ == '__main__':
     app.run_server(host='0.0.0.0', port=8050, debug=True)
