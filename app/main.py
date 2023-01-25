@@ -35,7 +35,7 @@ import dash
 from dash.exceptions import PreventUpdate
 #from dash import html as html
 # from dash.dependencies import Input, Output, State, MATCH, ALL
-from dash_extensions.enrich import Output, Input, html, State, MATCH, ALL, DashProxy, LogTransform, DashLogger, dcc, ServersideOutput, ServersideOutputTransform, FileSystemStore
+from dash_extensions.enrich import Output, Input, html, State, MATCH, ALL, DashProxy, LogTransform, DashLogger, dcc, FileSystemStore #ServersideOutput, ServersideOutputTransform, 
 import dash_bootstrap_components as dbc
 from dash_bootstrap_templates import ThemeSwitchAIO, load_figure_template
 import dash_mantine_components as dmc
@@ -234,7 +234,7 @@ my_backend = FileSystemStore(cache_dir="/tmp")
 app = DashProxy(__name__,
                 external_stylesheets=[url_theme1],#, dbc_css
                 meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
-                transforms=[LogTransform(), ServersideOutputTransform(backend=my_backend)]
+                transforms=[LogTransform()] #, ServersideOutputTransform(backend=my_backend)
                 )
 server=app.server
 cache = Cache(app.server, config={
@@ -484,7 +484,7 @@ def populate_LED(bubble_data, dash_logger: DashLogger):
     return int(sum(dataset['coeff'])*1000), int(dataset['all lice'])
     
 @app.callback(
-    ServersideOutput('planned_store','data'),
+    Output('planned_store','data'),
     Input('future_farms_toggle','on'),
     Input('planned_checklist','value'),
     Input('existing_farms_toggle','on'),
