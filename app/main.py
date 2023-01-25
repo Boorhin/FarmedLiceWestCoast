@@ -52,8 +52,8 @@ class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
-        #elif isinstance(obj, datetime):
-        #    return (str(obj))
+        elif isinstance(obj, datetime):
+            return (str(obj))
         else:
             return json.JSONEncoder.default(self, obj)
 
@@ -122,36 +122,48 @@ def select_zoom(zoom):
     elif 8<=zoom<9:
         r=100
     return r
+
+def query_tree():
+   seek= tree.query(np.array([farm_data[farm]['lon'], farm_data[farm]['lat']]).T, n)[1]
+   for i in range(n):
+                    remote_data= search_lice_data(start,end, Ids[i], farm, lice_data, farm_data)
+                    if remote_data is not None :
+                        return remote_data
+                        
     
-def fetch_biomass(farm_data, lice_data, activated_farms, biomass_factor, lice_factor, tree, times, ref_biom, Ids, year=2021):
+def fetch_biomass(farm_data, lice_data, activated_farms, biomass_factor, lice_factor, times, ref_biom, Ids, lice_time, flag, year=2021):
     '''
     Identify the biomass data for the month of may of the chosen year
     scale the data according to data
     remove farm with no data for the month
-    try to populate the lice density for each farm
-    may 2003 has no data and generate error
+    if flag is true (toggle is on) try to populate the lice density for each farm
     '''
     n= 50 #nb of nearest farms
-    start, end = datetime(year=year, month=4,day=30), datetime(year=year, month=6,day=1)
-    filters=np.where(np.logical_and(times> start, times<end))[0]
+    start, end = np.datetime64(datetime(year=year, month=4,day=30),'D'), np.datetime64(datetime(year=year, month=6,day=1),'D')
+    filters=np.where(np.logical_and(times> start, times< end))[0]
     filtered=times[filters]
     for farm in farm_data.keys():       
-        extract=farm_data[farm]['biomasses'][filters].mean()
+        extract=np.array(farm_data[farm]['biomasses'])[filters].mean()
         if np.isnan(extract):
             activated_farms[farm_data[farm]['ID']]= False
         else:
             biomass_factor[farm_data[farm]['ID']]=extract/farm_data[farm]['reference biomass']
             ref_biom[farm_data[farm]['ID']]=farm_data[farm]['reference biomass']
-            local_data=search_lice_data(start,end, farm_data[farm]['Site ID Scot env'], farm, lice_data, farm_data)
-            if local_data is not None :
-                lice_factor[farm_data[farm]['ID']]=local_data
-            else:
-                seek= tree.query(np.array([farm_data[farm]['lon'], farm_data[farm]['lat']]).T, n)[1]
-                for i in range(n):
-                    remote_data= search_lice_data(start,end, Ids[i], farm, lice_data, farm_data)
-                    if remote_data is not None :
-                        lice_factor[farm_data[farm]['ID']]=remote_data
-                        break
+            if flag:
+                ident=farm_data[farm]['Site ID Scot env']
+                if len(ident)>0:
+                    local_data=search_lice_data(start,end, ident, 
+                                            farm, lice_data['data_vars'][ident]['data'], 
+                                            farm_data[farm], lice_time)
+                    if local_data is not None :
+                        lice_factor[farm_data[farm]['ID']]=local_data
+                    else:
+                       logger.debug(f'No lice data for farm {farm} during May {year}')
+                       lice_factor[farm_data[farm]['ID']]=0.5                   
+                else:
+                    logger.debug(f'No ID for farm {farm}')
+                    lice_factor[farm_data[farm]['ID']]=0.5
+                
     return activated_farms, biomass_factor, lice_factor, ref_biom      
 
 
@@ -284,11 +296,11 @@ def global_store(r):
     super_ds=open_zarr(rootdir+pathtods) #.drop('North Kilbrannan')
     planned_ds= open_zarr(rootdir+pathtofut)
     ## remove border effects
-    super_ds= super_ds.where(super_ds.x<-509600)   
+    # super_ds= super_ds.where(super_ds.x<-509600)   
     return super_ds, planned_ds
     
 @app.callback(
-     ServersideOutput('init', 'data'),
+     Output('init', 'data'),
      Input(ThemeSwitchAIO.ids.switch("theme"), "value"),
      log = True
 )
@@ -310,14 +322,16 @@ def initialise_var(toggle, dash_logger: DashLogger):
     for mess, ok in zip(typos, correct):
         lice_data[ok].values[id_c]=lice_data[mess].values[id_c]
         lice_data=lice_data.drop(mess)
-    variables['lice_data']=lice_data
+    logger.debug(f'lice data:    {lice_data.to_dict()}')
+    variables['lice_data']=lice_data.to_dict()
+    variables['lice time']=variables['lice_data']['coords']['time']['data']
     csvfile='biomasses.csv'
-    variables['farm_data'], variables['times'], variables['tree'], variables['Ids'] =read_farm_data(rootdir+csvfile, lice_data)
+    variables['farm_data'], variables['times'], _ , variables['Ids'] =read_farm_data(rootdir+csvfile, lice_data)
     logger.info('Farm loaded')
     sepacsv= 'SEPA_GSID.csv'
     variables['farm_data']=add_new_SEPA_nb(rootdir+sepacsv, variables['farm_data'])
     logger.info('Variables loaded')
-    return [variables]
+    return json.dumps(variables, cls=NumpyEncoder)
 
 @app.callback(
     Output('theme_store', 'data'),
@@ -353,11 +367,11 @@ def toggle_egg_models(eggs, dash_logger: DashLogger):
     Input('init','data'),],
     log=True
     )
-def compute_lice_data(liceC, egg, meas, variables, dash_logger: DashLogger):
+def compute_lice_data(liceC, egg, meas, init, dash_logger: DashLogger):
     logger.info('scaling lice')
     logger.debug(f'egg is {egg}')
     dash_logger.info('Lice data are being scaled', autoClose=autocl)
-    variables=variables[0]
+    variables=json.loads(init)
     # modify egg model from Rittenhouse (16.9) to Stein (30)
     if egg:
         # lices *= 30/16.9
@@ -414,26 +428,26 @@ def store_viewport(relay, dash_logger: DashLogger):
     ],
     log=True
 )
-def mk_bubbles(year, biomC,lice_tst, variables, liceData, meas, dash_logger: DashLogger):
+def mk_bubbles(year, biomC,lice_tst, init, liceData, meas, dash_logger: DashLogger):
     dash_logger.info('Scaled biomass according to chosen parameters', autoClose=autocl)
     #liceData=json.loads(lice_data)
     #variables=json.loads(init)
     liceData=liceData[0]
-    variables=variables[0]
+    variables=json.loads(init)
     activated_farms= np.ones(len(variables['All_names']), dtype='bool')
     Coeff=np.ones(len(variables['All_names'])) 
     biomass_factor=np.ones(len(variables['All_names']))
-    lice_factor=liceData['lice factor']
+    lice_factor=np.array(liceData['lice factor'])
     if biomC ==0:
         biomC=0.00001
     biomC /=100
     logger.info('preparing lice factor')
     idx, biomass_factor, lice_factor, ref_biom=fetch_biomass(variables['farm_data'], variables['lice_data'], 
-                                                     activated_farms, biomass_factor, lice_factor, variables['tree'], 
-                                                     variables['times'], variables['ref_biom'], variables['Ids'], year)
-    # overwrite the computed lice... needs to change
-    if not meas:
-        lice_factor=liceData['lice factor']
+                                                     activated_farms, biomass_factor, lice_factor, 
+                                                     np.array(variables['times'],dtype='datetime64[D]'), 
+                                                     np.array(variables['ref_biom']), variables['Ids'], 
+                                                     np.array(variables['lice time'], dtype= "datetime64[D]"),meas, year)
+
     #dash_logger.info('Biomass and lice scaled', autoClose=autocl)
     name_list=np.array(list(variables['farm_data'].keys()))[idx]    
     ##### update discs farms
@@ -441,6 +455,9 @@ def mk_bubbles(year, biomC,lice_tst, variables, liceData, meas, dash_logger: Das
                                     biomass_factor[variables['farm_data'][farm]['ID']] *biomC
                                     for farm in name_list]
         # set global factor biomass x individual farm biom x individual lice x egg model
+    logger.debug(f'idx:      {type(idx)}')
+    logger.debug(f'biomass factor:      {type(biomass_factor)}')
+    logger.debug(f'lice factors:      {type(lice_factor)}')
     Coeff=biomC*biomass_factor[idx]*lice_factor[idx]
     alllice=(Coeff*ref_biom[idx]).sum()*4.5*1000
     return json.dumps({ 
@@ -481,9 +498,10 @@ def store_planned_farms(toggle_planned, checklist, toggle_existing, dash_logger:
     Output('planned_checklist','options'),
     Input('init','data')
     )
-def init_checklist(variables):
+def init_checklist(init):
     logger.info('generating checklist')
-    return variables[0]['future_farms']['Name']
+    variables=json.loads(init)
+    return [l[1] for l in variables['future_farms']]
 
 
 @app.callback(
@@ -507,12 +525,12 @@ def init_checklist(variables):
     ],
     log=True
 )
-def redraw( theme, plan, span, trigger, variables, bubble_data,  fig,  viewport, dash_logger: DashLogger): #, bubble_tmst
+def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport, dash_logger: DashLogger): #, bubble_tmst
     dash_logger.info('Updating the map', autoClose=autocl)
     logger.info('drawing the map')
     # logger.debug(f'figure:     {fig}')
     ctx = dash.callback_context
-    variables=variables[0]
+    # variables=variables[0]
     #dataset=dataset[0]
     #viewdata=viewdata[0]
     #theme=theme[0]
@@ -522,7 +540,7 @@ def redraw( theme, plan, span, trigger, variables, bubble_data,  fig,  viewport,
     viewdata= json.loads(viewport)
     theme=json.loads(theme)
     # plan=json.loads(plan_data)
-    # variables=json.loads(init)
+    variables=json.loads(init)
     # fig=json.loads(fig_data)
     
     fig['layout']['template']=mk_template(theme['template'])
@@ -533,10 +551,10 @@ def redraw( theme, plan, span, trigger, variables, bubble_data,  fig,  viewport,
     fig['data'][2]['lat']=[variables['farm_data'][farm]['lat'] for farm in variables['farm_data'].keys()]
     fig['data'][2]['lon']=[variables['farm_data'][farm]['lon'] for farm in variables['farm_data'].keys()]
     fig['data'][2]['text']=[farm for farm in variables['farm_data'].keys()]
-    fig['data'][3]['lat']=variables['future_farms']['Lat']
-    fig['data'][3]['lon']=variables['future_farms']['Lon']
-    fig['data'][3]['text']=variables['future_farms']['Name']
-    fig['data'][3]['marker']['size']=variables['future_farms']['Biomass_tonnes']
+    fig['data'][3]['lat']=[l[3] for l in variables['future_farms']]
+    fig['data'][3]['lon']=[l[-1] for l in variables['future_farms']]
+    fig['data'][3]['text']=[l[1] for l in variables['future_farms']]
+    fig['data'][3]['marker']['size']=[l[2] for l in variables['future_farms']]
     
     ### draw bubbles 
     #if ctx.triggered[0]['prop_id'] == 'bubbles.data':
@@ -623,9 +641,9 @@ def redraw( theme, plan, span, trigger, variables, bubble_data,  fig,  viewport,
     Output('dropdown_farms', 'options'),
     Input('init', 'data')
 )
-def populate_dropdown(variables):
+def populate_dropdown(init):
     logger.info('populating farm dropdown')
-    variables=variables[0]
+    variables=json.loads(init)
     return variables['All_names']
 
 
@@ -642,10 +660,10 @@ def populate_dropdown(variables):
 def farm_inspector(name, theme, init, curves, dash_logger: DashLogger):
     #theme=theme[0]
     theme=json.loads(theme)
-    variables=init[0]
+    variables=json.loads(init)
     template = theme['template']    
     logger.debug(f'curve name: {name}')  
-    time_range=   np.array([variables['times'][0],variables['lice_data'].time.values[-1]], dtype='datetime64[D]')#convert_dates()
+    time_range=   np.array([variables['times'][0],variables['lice_data']['coords']['time']['data'][-1]], dtype='datetime64[D]')#convert_dates()
     if not name:
         dash_logger.warning('No farm selected', autoClose=autocl)
         raise PreventUpdate
@@ -654,14 +672,14 @@ def farm_inspector(name, theme, init, curves, dash_logger: DashLogger):
         for i in range(4): # try to 0 de values
             curves['data'][i]['x']=[None]
             curves['data'][i]['y']=[None]
-        curves['data'][0]['x']=variables['times'].astype('datetime64[D]')
+        curves['data'][0]['x']=np.array(variables['times'], dtype='datetime64[D]')
         curves['data'][0]['y']=variables['farm_data'][name]['biomasses']
-        curves['data'][1]['x']=variables['lice_data'].time.values.astype('datetime64[D]')
+        curves['data'][1]['x']=np.array(variables['lice time'], dtype='datetime64[D]')
         curves['data'][1]['y']=variables['farm_data'][name]['lice data']
         curves['data'][2]['y']=[0.5,0.5]
         curves['data'][2]['x']= time_range 
         curves['data'][3]['x']= time_range 
-        curves['data'][3]['y']=[variables['farm_data'][name]['mean lice'].values, variables['farm_data'][name]['mean lice'].values]      
+        curves['data'][3]['y']=[variables['farm_data'][name]['mean lice'], variables['farm_data'][name]['mean lice']]      
         #curves=farm_plot(name, variables['times'], variables['farm_data'][name], variables['lice_data'], template)
         curves['layout']['template']=mk_template(template)
         logger.debug(curves)

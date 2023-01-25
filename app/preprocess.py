@@ -60,14 +60,19 @@ def read_farm_data(farmfile, lice_data):
                 del data[line[0]]
             #ref_biom[id]=ref
     logger.info('########## BIOMASS DATA READ ###########')
+    Ids=np.array([data[farm]['Site ID Scot env'] for farm in data.keys()])
+    tree = None #mk_kde_tree(data)
+    return data, times, tree , Ids
+
+def mk_kde_tree(data):
     logger.info('########## Making KDe Tree   ###########')
     Xs= np.array([data[farm]['lon'] for farm in data.keys()])
     Ys= np.array([data[farm]['lat'] for farm in data.keys()])
-    Ids=np.array([data[farm]['Site ID Scot env'] for farm in data.keys()])
+    
     tree = KDTree(np.vstack((Xs,Ys)).T)
     logger.debug(f'Kde tree :       {tree}')
     logger.info('########## Tree Made ############')
-    return data, times, tree, Ids
+    return tree
 
 def read_future_farms(filename):
     new_farm=np.genfromtxt(filename,
@@ -82,8 +87,8 @@ def add_lice_data(SEPA_ID, lice_data):
     av=np.nan
     for licence in lice_data.keys():
         if licence==SEPA_ID:
-            arr=lice_data[licence].values
-            av = lice_data[licence].mean()
+            arr= lice_data[licence].values
+            av = lice_data[licence].values.mean()
     return arr, av
     
 def prepare_zarr():
@@ -96,23 +101,26 @@ def prepare_zarr():
         ds.to_zarr(f'map_{res}m.zarr')#, safe_chunks=False)
     return
     
-def search_lice_data(start,end, ident, farm, lice_data, farm_data):
+def search_lice_data(start,end, ident, farm, l_data, fdata, lice_time):
     '''
     Search if there are data for the farm at the chosen date.
     Check it is not null
     return may data if available
     if not, try to return the average lice value for the farm.
     '''
-    if len(ident) >0:
-        may_data= lice_data[ident].sel(time=slice(start,end)).mean().values
-        if not np.isnan(may_data):
+    logger.debug(f'searching lice data for {ident}')
+    t_filter= np.where(np.logical_and(lice_time> start, lice_time< end))[0]
+    # logger.debug(f'Data for {ident} are:    {l_data}')
+    may_data= np.array(l_data)[t_filter].mean()
+    if not np.isnan(may_data):
             if may_data>0:
+                logger.info(f'found may data for {ident}')
                 return may_data
-        else:
-            if np.isnan(farm_data[farm]['mean lice']) is False:
-                return farm_data[farm]['mean lice']
     else:
-        logger.debug(f'No ID for farm {farm}')
+            if np.isnan(fdata['mean lice']) is False:
+                logger.info(f'Used average for {ident}')
+                return fdata['mean lice']
+
     
     
 
