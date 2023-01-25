@@ -346,7 +346,7 @@ def toggle_egg_models(eggs, dash_logger: DashLogger):
         return 'Rittenhouse et al. (2016)'
 
 @app.callback(
-    ServersideOutput('lice_store','data'),
+    Output('lice_store','data'),
     [Input('lice_knob','value'),
     Input('egg_toggle','on'),
     Input('lice_meas_toggle','on'),

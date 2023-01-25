@@ -13,7 +13,7 @@ COPY ./app ./
 
 #mount the NFS drive
 #RUN --mount=type=bind,target=/data,source=192.168.3.62:/srv/data
-
+RUN --mount=type=bind,target=/tmp,source=/dev/sdc
 # expose the right port?
 EXPOSE 8050
 
