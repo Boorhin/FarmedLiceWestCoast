@@ -651,6 +651,9 @@ def farm_inspector(name, theme, init, curves, dash_logger: DashLogger):
         raise PreventUpdate
     else:
         dash_logger.info(f'Computing curve for {name}', autoClose=autocl)
+        for i in range(4): # try to 0 de values
+            curves['data'][i]['x']=[None]
+            curves['data'][i]['y']=[None]
         curves['data'][0]['x']=variables['times'].astype('datetime64[D]')
         curves['data'][0]['y']=variables['farm_data'][name]['biomasses']
         curves['data'][1]['x']=variables['lice_data'].time.values.astype('datetime64[D]')
