@@ -88,7 +88,7 @@ def add_lice_data(SEPA_ID, lice_data):
     for licence in lice_data.keys():
         if licence==SEPA_ID:
             arr= lice_data[licence].values
-            av = lice_data[licence].values.mean()
+            av = np.nanmean(lice_data[licence].values)
     return arr, av
     
 def prepare_zarr():
