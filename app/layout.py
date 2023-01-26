@@ -357,11 +357,9 @@ def tab1_layout():
                                        2021:'2021'},
                                 value=2021,
                                 tooltip={"placement": "bottom"}),
-                    dbc.Tooltip('''Select the year of production. 
-                                Please be patient as the database is complex wait 
-                                for the notification stating the biomass has been scaled. 
-                                The map and the LED display will change when it is ready''', 
-                                        target= 'year_slider',)
+                    dbc.Tooltip('''Select the year of production ''', 
+                                        target= 'year_slider',
+                                        placement='bottom')
                 ]),
                 dbc.Row([
                     dbc.Col([
