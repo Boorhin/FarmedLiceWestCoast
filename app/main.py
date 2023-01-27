@@ -35,7 +35,7 @@ import dash
 from dash.exceptions import PreventUpdate
 #from dash import html as html
 # from dash.dependencies import Input, Output, State, MATCH, ALL
-from dash_extensions.enrich import Output, Input, html, State, MATCH, ALL, DashProxy, LogTransform, DashLogger, dcc, FileSystemStore #ServersideOutput, ServersideOutputTransform, 
+from dash_extensions.enrich import Output, Input, html, State, MATCH, ALL, DashProxy, LogTransform, DashLogger, dcc # FileSystemStore #ServersideOutput, ServersideOutputTransform, 
 import dash_bootstrap_components as dbc
 from dash_bootstrap_templates import ThemeSwitchAIO, load_figure_template
 import dash_mantine_components as dmc
@@ -47,6 +47,16 @@ from dash.exceptions import PreventUpdate
 
 from layout import *
 from preprocess import *
+
+class DashLoggerHandler(logging.StreamHandler):
+    def __init__(self):
+        logging.StreamHandler.__init__(self)
+        self.queue = []
+
+    def emit(self, record):
+        msg = self.format(record)
+        self.queue.append(msg)
+
 
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -65,6 +75,13 @@ def get_coordinates(arr):
     coordinates[2]=p(arr.x.values[-1],arr.y.values[-1], inverse=True)
     coordinates[3]=p(arr.x.values[0],arr.y.values[-1], inverse=True)
     return coordinates[::-1]
+
+def crop_ds(ds, viewdata):
+    return ds.where((ds.x<viewdata['xmax'] ) &
+                           (ds.x>viewdata['xmin'] ) &
+                           (ds.y>viewdata['ymin'] ) &
+                           (ds.y<viewdata['ymax'] ))
+                           
     
 def calculate_edge(coordinates):
     #'mapbox._derived': 
@@ -172,6 +189,8 @@ logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m
 logger = logging.getLogger('sealice_logger')
 logger.setLevel(logging.DEBUG)
 autocl=2000 #time to close notification
+dashLoggerHandler = DashLoggerHandler()
+logger.addHandler(dashLoggerHandler)
 
 ############# VARIABLES ##########################33
  # value extent
@@ -230,7 +249,7 @@ dbc_css = (
 
 
 ######### APP DEFINITION ############
-my_backend = FileSystemStore(cache_dir="/tmp")
+#my_backend = FileSystemStore(cache_dir="/tmp")
 app = DashProxy(__name__,
                 external_stylesheets=[url_theme1],#, dbc_css
                 meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
@@ -252,8 +271,7 @@ def warmup():
 
 app.title="Heatmap Dashboard"
 app.layout = dbc.Container([
-    #Store
-    html.Div([
+    html.Div([    #Store
         dcc.Store(id='init', storage_type='session'),
         dcc.Store(id='bubbles', storage_type='session'),
         dcc.Store(id='lice_store', storage_type='session'),
@@ -261,32 +279,21 @@ app.layout = dbc.Container([
         dcc.Store(id='theme_store', storage_type='session'),
         dcc.Store(id='planned_store', storage_type='session'),
         dcc.Store(id='fig_store', storage_type='session'),
-        
-    #header
-        html.Div([ 
-            html.Img(src='assets/logo.svg',
-                     width=96,
-                     alt='logo',
-                     style={'float':'right', 'padding':'5px'},
-                     className='logo'),          
-            html.H1('Scottish Westcoast artificial sealice infestation'),
-            ThemeSwitchAIO(aio_id='theme',
-                    icons={"left": "fa fa-sun", "right": "fa fa-moon"},
-                    themes=[url_theme1, url_theme2])
-            ]),
-    # Define tabs
-        html.Div([
+        ]),
+    dbc.Card([
+        dbc.CardHeader(main_header()),
+        dbc.CardBody([
             dbc.Tabs(id='all_tabs',
-                children= [
-                dbc.Tab(tab1_layout(),label='Interactive map',tab_id='tab-main',),
-                #dbc.Tab(tab2_layout(farm_data, marks_biomass,marks_lice),label='Tuning dashboard',tab_id='tab-tunning',),
-                dbc.Tab(tab3_layout(),label='Farm data inspection',tab_id='tab-graph',),
-                #dbc.Tab(tab4_layout(farm_data), label='All farms toggles', tab_id='tab-toggle'),
-                ])
-            ])
-        ])
-], fluid=True, className='dbc')
-
+                    children= [
+                        dbc.Tab(tab1_layout(),label='Interactive map',tab_id='tab-main',),
+                        #dbc.Tab(tab2_layout(farm_data, marks_biomass,marks_lice),label='Tuning dashboard',tab_id='tab-tunning',),
+                        dbc.Tab(tab3_layout(),label='Farm data inspection',tab_id='tab-graph',),
+                        dbc.Tab(tab4_layout(), label='console', tab_id='tab-console'),
+                    ])
+             ]),
+        dbc.CardFooter([main_footer()])
+        ])    
+     ], fluid=True, className='dbc')
 
 @cache.memoize()
 def global_store(r):
@@ -322,7 +329,7 @@ def initialise_var(toggle, dash_logger: DashLogger):
     for mess, ok in zip(typos, correct):
         lice_data[ok].values[id_c]=lice_data[mess].values[id_c]
         lice_data=lice_data.drop(mess)
-    logger.debug(f'lice data:    {lice_data.to_dict()}')
+    # logger.debug(f'lice data:    {lice_data.to_dict()}')
     variables['lice_data']=lice_data.to_dict()
     variables['lice time']=variables['lice_data']['coords']['time']['data']
     csvfile='biomasses.csv'
@@ -395,12 +402,13 @@ def compute_lice_data(liceC, egg, meas, init, dash_logger: DashLogger):
     log=True
     )
 def store_viewport(relay, dash_logger: DashLogger):
-    dash_logger.info('Updating viewport data', autoClose=autocl)
+    #dash_logger.info('Updating viewport data', autoClose=autocl)
     logger.debug('Storing viewport data')
     logger.debug(f'relay:    {relay}')
     if relay is not None:
         zoom=relay['mapbox.zoom']
         bbox=relay['mapbox._derived']['coordinates']
+        dash_logger.info(f'Potential heatmap zoom :   {zoom}', autoClose=autocl)
     else:
         zoom=5.
         bbox=[[-16., 60.], 
@@ -591,41 +599,44 @@ def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport, dash
        ctx.triggered[0]['prop_id'] =='span-slider.value': 
         if plan['existing'] or plan['planned']:
             dash_logger.info('Updating the density map', autoClose=autocl)
-            logger.info('rasterizing map')
+            logger.info('rasterizing the heatmap')
             r = select_zoom(viewdata['zoom'])
             logger.debug('zoom: {}, resolution: {}'.format(viewdata['zoom'], r))
             super_ds, planned_ds=global_store(r)
             logger.info('global store loaded')
             if plan['existing']:
-                ds= super_ds
+                logger.debug('Cropping super ds')
+                ds= crop_ds(super_ds, viewdata)
                 name_list=dataset['name list'][1:] #### remove Achintraid because only NaN for some reason
-                logger.debug(f'name list:    {name_list}')
+                logger.debug('Cropped')
                 ds=ds[name_list]
-                for i in range(len(name_list)):
+                logger.debug('Scaling the super ds with parameters')
+                for i in range(len(name_list)):                    
                     ds[name_list[i]].values *=dataset['coeff'][i]
+                logger.debug('Scaled')    
                 if plan['planned']:
+                    logger.debug('adding planned farms')
+                    planned_ds=crop_ds(planned_ds, viewdata)
                     name_list=np.hstack((name_list,plan['checklist']))
                     for var in plan['checklist']:
                         ds[var]=planned_ds[var]*dataset['lice/egg factor']
+                    logger.debug('added and scaled planned farms')
             else:
+                logger.debug('adding only planned farms')
                 if len(plan['checklist'])>0:
-                    ds=planned_ds[plan['checklist']]*dataset['lice/egg factor']
+                    ds=crop_ds(planned_ds[plan['checklist']]*dataset['lice/egg factor'], viewdata)
                     name_list=plan['checklist']
                 else:
                     dash_logger.warning('No farm choosen in the checklist')
                     raise PreventUpdate
-            subds=ds.where((ds.x<viewdata['xmax'] ) &
-                           (ds.x>viewdata['xmin'] ) &
-                           (ds.y>viewdata['ymin'] ) &
-                           (ds.y<viewdata['ymax'] ))
-            coordinates=get_coordinates(subds)
-            logger.debug(f'subds:      {subds}')
-            logger.debug(f'name_list:   {name_list}')
+            coordinates=get_coordinates(ds)
+            # logger.debug(f'subds:      {ds}')
+            logger.debug(f'Selected farms for the map:   {name_list}')
             logger.debug(f'coordinates:     {coordinates}')
             fig['layout']['mapbox']['layers']=[{
                                         "below": 'traces',
                                         "sourcetype": "image",
-                                        "source": mk_img(subds, span, theme['cmp']),
+                                        "source": mk_img(ds, span, theme['cmp']),
                                         "coordinates": coordinates
                                     },]
             logger.info('raster loaded')
@@ -684,6 +695,14 @@ def farm_inspector(name, theme, init, curves, dash_logger: DashLogger):
         curves['layout']['template']=mk_template(template)
         logger.debug(curves)
         return curves, mk_farm_layout(name, marks_biomass,marks_lice, variables['farm_data'][name])
+
+@app.callback(
+    Output('logs', 'value'),
+    Input('interval', 'n_intervals')
+)
+def update_output(n):
+    return ('\n'.join(dashLoggerHandler.queue))
+
 
 if __name__ == '__main__':
     app.run_server(host='0.0.0.0', port=8050, debug=True)

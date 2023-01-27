@@ -10,7 +10,7 @@ import logging, random
 import numpy as np
 from datetime import datetime, timedelta
 from colorcet import fire
-
+from dash_bootstrap_templates import ThemeSwitchAIO, load_figure_template
 
 ###########  manage themes ###############
 
@@ -29,6 +29,43 @@ def mk_template(template):
     fig.update_layout(template=template)
     return fig['layout']['template']
     
+    
+#### manage main card ###############
+
+def main_header():
+    '''
+    Define the main header of the app'''
+    url_theme1=dbc.themes.SLATE
+    url_theme2=dbc.themes.SANDSTONE
+    return [html.Img(src='assets/logo.svg',
+                     width=96,
+                     alt='logo',
+                     style={'float':'right', 'padding':'5px'},
+                     className='logo'),          
+            html.H1('Scottish Westcoast artificial sealice infestation'),
+            ThemeSwitchAIO(aio_id='theme',
+                    icons={"left": "fa fa-sun", "right": "fa fa-moon"},
+                    themes=[url_theme1, url_theme2])
+            ]
+
+def main_footer():
+    '''
+    Define the main footer of the app'''
+    return dbc.Row([
+                dbc.Col([
+                    dbc.CardLink('Developped for the Coastal Community Network', 
+                        href="https://www.communitiesforseas.scot"),
+                    dbc.CardLink('contact', href="mailto:julien.moreau@nw-edge.org")]),
+                dbc.Col([
+                    html.P('Copyright 2022-3'),
+                    dbc.CardLink('source code', href="https://github.com/Boorhin/FarmedLiceWestCoast"),
+                    ]),
+                dbc.Col([
+                    dbc.CardLink('Hosted by JASMIN', href="https://jasmin.ac.uk/"),
+                    html.Img(src='assets/jasmin_logo.png')
+                    ]),
+                ],justify='center', align='center')
+ 
 #####################TAB 1 ###########################
 
 def init_the_figure():
@@ -432,7 +469,8 @@ def init_farm_plot():
                                name='Average lice infestation'),
                                secondary_y= True)
     for y in range(2003,2022):
-        fig_p.add_vline(x=datetime(year=y, month=5, day=1), line=dict(color='green', dash='dash'))
+        fig_p.add_vrect(x0=datetime(year=y, month=5, day=1),x1=datetime(year=y, month=6, day=1),line=dict(width=0), fillcolor="green", opacity=0.7)
+        #fig_p.add_vline(x=datetime(year=y, month=5, day=1), line=dict(color='green', dash='dash'))
     fig_p.update_yaxes(title='Recorded fish farmbiomass (tons)',
                     showgrid=False, secondary_y=False)
     fig_p.update_yaxes(title='Reported average lice/fish',
@@ -525,6 +563,14 @@ def tab3_layout():
         
     ])
 ])
+
+##################### TAB4 #############################3
+
+
+def tab4_layout():
+    return [
+     dcc.Textarea(id='logs', style={'width':'100%','height':300}),
+     dcc.Interval(id='interval')]
 
 logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S')
 logger = logging.getLogger('sealice_logger')
