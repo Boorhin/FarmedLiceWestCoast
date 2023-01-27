@@ -256,9 +256,10 @@ app = DashProxy(__name__,
                 transforms=[LogTransform()] #, ServersideOutputTransform(backend=my_backend)
                 )
 server=app.server
+#### need to make a way to swap between localhost and 
 cache = Cache(app.server, config={
-    'CACHE_TYPE': 'filesystem',
-    'CACHE_DIR': '/tmp'
+    'CACHE_TYPE': 'RedisCache',
+    'CACHE_REDIS_HOST':'redis-ss-0'
 })
 timeout = 300
 
@@ -408,7 +409,7 @@ def store_viewport(relay, dash_logger: DashLogger):
     if relay is not None:
         zoom=relay['mapbox.zoom']
         bbox=relay['mapbox._derived']['coordinates']
-        dash_logger.info(f'Potential heatmap zoom :   {zoom}', autoClose=autocl)
+        dash_logger.info(f'Potential heatmap resolution :   {select_zoom(zoom)}m', autoClose=autocl)
     else:
         zoom=5.
         bbox=[[-16., 60.], 
