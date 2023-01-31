@@ -229,7 +229,7 @@ p=Proj("epsg:3857", preserve_units=False)
 # test local vs host
 if os.path.exists('/mnt/nfs/data/'):
     rootdir='/mnt/nfs/data/'
-    cacheconfig={'CACHE_TYPE': 'RedisCluster',
+    cacheconfig={'CACHE_TYPE': 'RedisClusterCache',
                 'CACHE_REDIS_HOST':'redis-ss-0'
     }
 else:
