@@ -327,9 +327,12 @@ def mk_map_pres(): #
                 dbc.CardHeader('Selected Farm'),
                 dbc.CardBody([
                     html.P(id='name_farm'),
-                    dbc.Button('Inspect farm data',
+                    html.Div(
+                        [dbc.Button('Inspect farm data',
                                id='inspect-button', 
-                               n_clicks=0),
+                               n_clicks=0),],
+                        className="d-grid gap-2 d-md-flex justify-content-md-center",
+                        ),
                     ]),
                 ]),
             ],width=3),

@@ -229,8 +229,8 @@ p=Proj("epsg:3857", preserve_units=False)
 # test local vs host
 if os.path.exists('/mnt/nfs/data/'):
     rootdir='/mnt/nfs/data/'
-    cacheconfig={'CACHE_TYPE': 'RedisClusterCache',
-                'CACHE_REDIS_HOST':'redis-ss-0'
+    cacheconfig={'CACHE_TYPE': 'RedisCache',
+                'CACHE_REDIS_HOST':'redis-ss-0.redis-service.redis'
     }
 else:
     rootdir='/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'
