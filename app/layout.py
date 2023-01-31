@@ -310,19 +310,28 @@ def mk_map_pres(): #
                                 ])
                             )
                         ])
-        ],width=3),
+            ],width=3),
         dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader('Select the planned farms to include in the map'),
-                        dbc.CardBody([
-                            dcc.Checklist(
+            dbc.Card([
+                dbc.CardHeader('Select the planned farms to include in the map'),
+                dbc.CardBody([
+                    dcc.Checklist(
                                 id='planned_checklist',
                                 # options=future_farms['Name'],
                                 inline=False,
                                 labelStyle={'display': 'block'},
                                 ),     
-                            ]),
-                        ]),
+                      ]),
+                 ]),
+            dbc.Card([
+                dbc.CardHeader('Selected Farm'),
+                dbc.CardBody([
+                    html.P(id='name_farm'),
+                    dbc.Button('Inspect farm data',
+                               id='inspect-button', 
+                               n_clicks=0),
+                    ]),
+                ]),
             ],width=3),
         dbc.Col([
             tuning_card()

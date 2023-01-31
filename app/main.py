@@ -229,9 +229,13 @@ p=Proj("epsg:3857", preserve_units=False)
 # test local vs host
 if os.path.exists('/mnt/nfs/data/'):
     rootdir='/mnt/nfs/data/'
+    cacheconfig={'CACHE_TYPE': 'RedisCluster',
+                'CACHE_REDIS_HOST':'redis-ss-0'
+    }
 else:
     rootdir='/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'
-
+    cacheconfig={'CACHE_TYPE': 'RedisCache',
+    'CACHE_REDIS_HOST':'localhost'}
 
     
 template_theme1 = "slate"
@@ -257,10 +261,7 @@ app = DashProxy(__name__,
                 )
 server=app.server
 #### need to make a way to swap between localhost and 
-cache = Cache(app.server, config={
-    'CACHE_TYPE': 'RedisCache',
-    'CACHE_REDIS_HOST':'redis-ss-0'
-})
+cache = Cache(app.server, config=cacheconfig)
 timeout = 300
 
 @server.route('/_ah/warmup')
@@ -648,6 +649,31 @@ def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport, dash
         #    fig['layout']['mapbox']['layers']=[]
 
     return fig, None
+    
+@app.callback(
+    Output('name_farm', 'children'),
+    Input('heatmap','clickData'),
+    log=True)
+def grab_farm(select, dash_logger: DashLogger):
+    if select is None:
+        raise PreventUpdate
+    logger.debug (f"{select['points'][0]['text']} was selected")
+    dash_logger.info(f"You have selected the farm {select['points'][0]['text']}.", autoClose=autocl)
+    return select['points'][0]['text']
+
+@app.callback(
+    Output('all_tabs', 'active_tab'),
+    Output('dropdown_farms', 'value'),
+    Input('inspect-button', 'n_clicks'),
+    State('name_farm', 'children'),
+    log=True
+    )
+def inspect_farm(click, name, dash_logger: DashLogger):
+    logger.debug('Inspecting farm')
+    if name is None:
+        dash_logger.warning('No farm has been selected on the map', autoClose=autocl)
+        raise PreventUpdate
+    return 'tab-graph', name
 
 @app.callback(
     Output('dropdown_farms', 'options'),
