@@ -220,7 +220,9 @@ def tuning_card():
                         # min=0.1,
                         scale={'start':0,'labelInterval':5,'interval':5},
                         color='#f89406'
-                        )
+                        ),
+                    dbc.Tooltip(''' 
+                        Decrease or increase all the fish farm biomasses.''',target='biomass_knob'),
                     ]),
                 dbc.Col([
                     daq.Knob(
@@ -232,6 +234,10 @@ def tuning_card():
                         scale={'start':0, 'labelInterval':10,'interval':0.05},
                         color='#f89406'
                         ),
+                    dbc.Tooltip(''' 
+                        Decrease or increase the infestation rates for all the farms. 
+                        The good practice is to maintain at 0.5 louse/fish. 
+                        Infestations of 8 have been reported (cf. farm inspection tab)''',target='biomass_knob'),
                     daq.BooleanSwitch(
                          id='lice_meas_toggle',
                          label='Use and extrapolate reported lice',
@@ -313,8 +319,9 @@ def mk_map_pres(): #
             ],width=3),
         dbc.Col([
             dbc.Card([
-                dbc.CardHeader('Select the planned farms to include in the map'),
+                dbc.CardHeader('Select the planned farms to include'),
                 dbc.CardBody([
+                    html.H5("Planned farms appear as blue bubbles"),
                     dcc.Checklist(
                                 id='planned_checklist',
                                 # options=future_farms['Name'],
@@ -326,10 +333,16 @@ def mk_map_pres(): #
             dbc.Card([
                 dbc.CardHeader('Selected Farm'),
                 dbc.CardBody([
-                    html.P(id='name_farm'),
-                    dbc.Button('Inspect farm data',
+                    html.Div([
+                        html.P(id='name_farm'),
+                        dbc.Button('Inspect farm data',
                                id='inspect-button', 
-                               n_clicks=0),
+                               n_clicks=0),],
+                        className="d-grid gap-2 d-md-flex justify-content-md-center",
+                        ),
+                    dbc.Tooltip('''
+                        Inspect the active farm you selected on the map''',
+                        target='inspect-button'),
                     ]),
                 ]),
             ],width=3),

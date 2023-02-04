@@ -17,7 +17,7 @@
 from  xarray import open_zarr
 #from rasterio.enums import Resampling
 import rioxarray
-import json, logging
+import json, logging, orjson
 #from google.cloud import storage
 import numpy as np
 
@@ -29,7 +29,7 @@ from plotly.subplots import make_subplots
 from colorcet import fire, bmy
 from datashader import transfer_functions as tf
 from datetime import datetime, timedelta
-import os.path
+from os import path, environ
 import dash
 # from dash import dcc as dcc
 from dash.exceptions import PreventUpdate
@@ -44,9 +44,20 @@ import dash_daq as daq
 
 from flask_caching import Cache
 from dash.exceptions import PreventUpdate
+from celery import Celery
 
 from layout import *
 from preprocess import *
+
+class JsonEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, datetime):
+            return (str(obj))
+        else:
+            return json.JSONEncoder.default(self, obj)
+            
 
 class DashLoggerHandler(logging.StreamHandler):
     def __init__(self):
@@ -56,16 +67,6 @@ class DashLoggerHandler(logging.StreamHandler):
     def emit(self, record):
         msg = self.format(record)
         self.queue.append(msg)
-
-
-class NumpyEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, datetime):
-            return (str(obj))
-        else:
-            return json.JSONEncoder.default(self, obj)
 
 def get_coordinates(arr):
     logger.debug('compute corner coordinates of filtered dataset')
@@ -184,6 +185,7 @@ def fetch_biomass(farm_data, lice_data, activated_farms, biomass_factor, lice_fa
     return activated_farms, biomass_factor, lice_factor, ref_biom      
 
 
+
 #### SET LOGGER #####
 logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S')
 logger = logging.getLogger('sealice_logger')
@@ -227,15 +229,11 @@ p=Proj("epsg:3857", preserve_units=False)
 
 ##################### FETCH DATA ###################
 # test local vs host
-if os.path.exists('/mnt/nfs/data/'):
+if path.exists('/mnt/nfs/data/'):
     rootdir='/mnt/nfs/data/'
-    cacheconfig={'CACHE_TYPE': 'RedisClusterCache',
-                'CACHE_REDIS_HOST':'redis-ss-0'
-    }
 else:
     rootdir='/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'
-    cacheconfig={'CACHE_TYPE': 'RedisCache',
-    'CACHE_REDIS_HOST':'localhost'}
+
 
     
 template_theme1 = "slate"
@@ -251,6 +249,12 @@ dbc_css = (
     "https://cdn.jsdelivr.net/gh/AnnMarieW/dash-bootstrap-templates@V1.0.1/dbc.min.css"
 )
 
+# Cache config
+cacheconfig={'CACHE_TYPE': 'RedisCache',
+             'CACHE_REDIS_HOST': environ['REDIS_URL']
+    }
+#celery_app = Celery(__name__, broker=environ['REDIS_URL'], backend=environ['REDIS_URL'])
+#background_callback_manager = dash.CeleryManager(celery_app)
 
 ######### APP DEFINITION ############
 #my_backend = FileSystemStore(cache_dir="/tmp")
@@ -297,17 +301,17 @@ app.layout = dbc.Container([
         ])    
      ], fluid=True, className='dbc')
 
+# there is a chance that this is shared between users...
 @cache.memoize()
 def global_store(r):
     pathtods=f'curr_{r}m.zarr'
     pathtofut=f'planned_{r}m.zarr'
     logger.info(f'using global store {pathtods}')
-    super_ds=open_zarr(rootdir+pathtods) #.drop('North Kilbrannan')
+    super_ds=open_zarr(rootdir+pathtods) 
     planned_ds= open_zarr(rootdir+pathtofut)
-    ## remove border effects
-    # super_ds= super_ds.where(super_ds.x<-509600)   
     return super_ds, planned_ds
-    
+
+@cache.memoize    
 @app.callback(
      Output('init', 'data'),
      Input(ThemeSwitchAIO.ids.switch("theme"), "value"),
@@ -340,7 +344,8 @@ def initialise_var(toggle, dash_logger: DashLogger):
     sepacsv= 'SEPA_GSID.csv'
     variables['farm_data']=add_new_SEPA_nb(rootdir+sepacsv, variables['farm_data'])
     logger.info('Variables loaded')
-    return json.dumps(variables, cls=NumpyEncoder)
+    return json.dumps(variables, cls= JsonEncoder) 
+#orjson.dumps(variables, option= orjson.OPT_NAIVE_UTC | orjson.OPT_SERIALIZE_NUMPY)
 
 @app.callback(
     Output('theme_store', 'data'),
@@ -420,7 +425,7 @@ def store_viewport(relay, dash_logger: DashLogger):
     corners=calculate_edge(np.array(bbox))
     #corners['bbox']=bbox
     corners['zoom']=zoom
-    return json.dumps(corners)
+    return json.dumps(corners, cls= JsonEncoder)
     
         
 
@@ -440,8 +445,6 @@ def store_viewport(relay, dash_logger: DashLogger):
 )
 def mk_bubbles(year, biomC,lice_tst, init, liceData, meas, dash_logger: DashLogger):
     dash_logger.info('Scaled biomass according to chosen parameters', autoClose=autocl)
-    #liceData=json.loads(lice_data)
-    #variables=json.loads(init)
     liceData=liceData[0]
     variables=json.loads(init)
     activated_farms= np.ones(len(variables['All_names']), dtype='bool')
@@ -478,7 +481,7 @@ def mk_bubbles(year, biomC,lice_tst, init, liceData, meas, dash_logger: DashLogg
          'year': year,
          'biomass knob':biomC,
          'lice/egg factor':liceData['lice knob']*liceData['egg factor'],
-         }, cls=NumpyEncoder)
+         }, cls= JsonEncoder)
      
 @app.callback(
     [Output('LED_biomass','value'),
@@ -549,9 +552,8 @@ def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport, dash
     dataset= json.loads(bubble_data)
     viewdata= json.loads(viewport)
     theme=json.loads(theme)
-    # plan=json.loads(plan_data)
     variables=json.loads(init)
-    # fig=json.loads(fig_data)
+
     
     fig['layout']['template']=mk_template(theme['template'])
     fig['layout']['mapbox']['style']=theme['carto_style']
@@ -681,6 +683,7 @@ def inspect_farm(click, name, dash_logger: DashLogger):
 )
 def populate_dropdown(init):
     logger.info('populating farm dropdown')
+    logger.debug(f' serialised: {init[10980:11000]}')
     variables=json.loads(init)
     return variables['All_names']
 
@@ -723,12 +726,12 @@ def farm_inspector(name, theme, init, curves, dash_logger: DashLogger):
         logger.debug(curves)
         return curves, mk_farm_layout(name, marks_biomass,marks_lice, variables['farm_data'][name])
 
-@app.callback(
-    Output('logs', 'value'),
-    Input('interval', 'n_intervals')
-)
-def update_output(n):
-    return ('\n'.join(dashLoggerHandler.queue))
+#@app.callback(
+#    Output('logs', 'value'),
+#    Input('interval', 'n_intervals')
+#)
+#def update_output(n):
+#    return ('\n'.join(dashLoggerHandler.queue))
 
 
 if __name__ == '__main__':
