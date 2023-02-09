@@ -111,11 +111,10 @@ def init_the_figure():
                                 name='Planned farms'))
 
     fig.update_layout(
-                height=512,
-                width=1024,
+                #height=512,
                 hovermode='closest',
                 showlegend=False,
-                margin=dict(b=3, t=5),
+                margin=dict(b=1, t=1, l=0, r=0.1),
                 # template=template,
                 mapbox=dict(
                     bearing=0,
@@ -167,7 +166,7 @@ def make_base_figure(farm_data, center_lat, center_lon, span, cmp, template):
 
     fig.update_layout(
                 height=512,
-                width=1024,
+                # width=1024,
                 hovermode='closest',
                 showlegend=False,
                 margin=dict(b=3, t=5),
@@ -372,7 +371,7 @@ def tab1_layout():
                         type='graph',
                         fullscreen=True
                         ),
-                    ], width=10),
+                    ], width=9),
                 dbc.Col([
                     html.P(
                                 children='(copepodid/sqm/day)',

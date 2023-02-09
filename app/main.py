@@ -260,7 +260,7 @@ cacheconfig={'CACHE_TYPE': 'RedisCache',
 #my_backend = FileSystemStore(cache_dir="/tmp")
 app = DashProxy(__name__,
                 external_stylesheets=[url_theme1],#, dbc_css
-                meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
+                meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1, maximum-scale=1.2, minimum-scale=0.5"}],
                 transforms=[LogTransform()] #, ServersideOutputTransform(backend=my_backend)
                 )
 server=app.server
