@@ -51,6 +51,8 @@ def main_header():
 def main_footer():
     '''
     Define the main footer of the app'''
+    with open('assets/build-date.txt') as f:
+         date=f.readline()
     return dbc.Row([
                 dbc.Col([
                     dbc.CardLink('Developped for the Coastal Community Network', 
@@ -58,6 +60,7 @@ def main_footer():
                     dbc.CardLink('contact', href="mailto:julien.moreau@nw-edge.org")]),
                 dbc.Col([
                     html.P('Copyright 2022-3'),
+                    html.P(f'Latest build {date}'),
                     dbc.CardLink('source code', href="https://github.com/Boorhin/FarmedLiceWestCoast"),
                     ]),
                 dbc.Col([

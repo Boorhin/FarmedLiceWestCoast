@@ -19,3 +19,6 @@ USER appUser
 
 # Run locally on port 8080
 CMD gunicorn --workers=4 --bind 0.0.0.0:8050 main:server
+
+#add time-stamp
+RUN date "+%Y-%m-%dT%H:%M">build-date.txt
