@@ -51,6 +51,8 @@ def main_header():
 def main_footer():
     '''
     Define the main footer of the app'''
+    with open('assets/build-date.txt') as f:
+         date=f.readline()
     return dbc.Row([
                 dbc.Col([
                     dbc.CardLink('Developped for the Coastal Community Network', 
@@ -58,6 +60,7 @@ def main_footer():
                     dbc.CardLink('contact', href="mailto:julien.moreau@nw-edge.org")]),
                 dbc.Col([
                     html.P('Copyright 2022-3'),
+                    html.P(f'Latest build {date}'),
                     dbc.CardLink('source code', href="https://github.com/Boorhin/FarmedLiceWestCoast"),
                     ]),
                 dbc.Col([
@@ -111,11 +114,10 @@ def init_the_figure():
                                 name='Planned farms'))
 
     fig.update_layout(
-                height=512,
-                width=1024,
+                #height=512,
                 hovermode='closest',
                 showlegend=False,
-                margin=dict(b=3, t=5),
+                margin=dict(b=1, t=1, l=0, r=0.1),
                 # template=template,
                 mapbox=dict(
                     bearing=0,
@@ -167,7 +169,7 @@ def make_base_figure(farm_data, center_lat, center_lon, span, cmp, template):
 
     fig.update_layout(
                 height=512,
-                width=1024,
+                # width=1024,
                 hovermode='closest',
                 showlegend=False,
                 margin=dict(b=3, t=5),
@@ -372,7 +374,7 @@ def tab1_layout():
                         type='graph',
                         fullscreen=True
                         ),
-                    ], width=10),
+                    ], width=9),
                 dbc.Col([
                     html.P(
                                 children='(copepodid/sqm/day)',
