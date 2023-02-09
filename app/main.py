@@ -294,7 +294,7 @@ app.layout = dbc.Container([
                         dbc.Tab(tab1_layout(),label='Interactive map',tab_id='tab-main',),
                         #dbc.Tab(tab2_layout(farm_data, marks_biomass,marks_lice),label='Tuning dashboard',tab_id='tab-tunning',),
                         dbc.Tab(tab3_layout(),label='Farm data inspection',tab_id='tab-graph',),
-                        dbc.Tab(tab4_layout(), label='console', tab_id='tab-console'),
+                        dbc.Tab(tab4_layout(), label='Documentation', tab_id='tab-doc'),
                     ])
              ]),
         dbc.CardFooter([main_footer()])
@@ -369,7 +369,7 @@ def record_theme(toggle, dash_logger: DashLogger):
 def toggle_egg_models(eggs, dash_logger: DashLogger):
     dash_logger.info('Egg production model changed', autoClose=autocl)
     if eggs:
-        return 'Stien (2005)'
+        return 'Stien et al. (2005)'
     else:
         return 'Rittenhouse et al. (2016)'
 
@@ -570,7 +570,7 @@ def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport, dash
     
     ### draw bubbles 
     #if ctx.triggered[0]['prop_id'] == 'bubbles.data':
-    dash_logger.info('Updating farm discs', autoClose=autocl)  
+    # dash_logger.info('Updating farm discs', autoClose=autocl)  
     fig['data'][1]=go.Scattermapbox(
                                 lat=[variables['farm_data'][farm]['lat'] for farm in dataset['name list']],
                                 lon=[variables['farm_data'][farm]['lon'] for farm in dataset['name list']],
