@@ -10,6 +10,8 @@ RUN pip install -r /requirements.txt
 
 # Copy app folder to app folder in container
 COPY ./app ./
+#add time-stamp
+RUN date "+%Y-%m-%dT%H:%M">assets/build-date.txt
 
 EXPOSE 8050
 
@@ -20,5 +22,4 @@ USER appUser
 # Run locally on port 8080
 CMD gunicorn --workers=4 --bind 0.0.0.0:8050 main:server
 
-#add time-stamp
-RUN date "+%Y-%m-%dT%H:%M">assets/build-date.txt
+
