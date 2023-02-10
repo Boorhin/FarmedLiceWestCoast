@@ -82,7 +82,7 @@ def crop_ds(ds, viewdata):
     return ds.where((ds.x<viewdata['xmax'] ) &
                            (ds.x>viewdata['xmin'] ) &
                            (ds.y>viewdata['ymin'] ) &
-                           (ds.y<viewdata['ymax'] ))
+                           (ds.y<viewdata['ymax'] ), drop=True)
                            
     
 def calculate_edge(coordinates):
@@ -132,13 +132,13 @@ def select_zoom(zoom):
     '''
     if zoom <6:
         r=800
-    #elif zoom>=11:
-    #    r= 50
-    elif 6<=zoom<7.75:
+    elif zoom>=9.1:
+        r= 50
+    elif 6<=zoom<7.1:
         r=400
-    elif 7.75<=zoom<8.8:
+    elif 7.1<=zoom<8.1:
         r=200
-    elif zoom>=8.8: #<11:
+    elif 8.1<zoom<=9.1:
         r=100
     return r
 
@@ -306,9 +306,12 @@ app.layout = dbc.Container([
 @cache.memoize()
 def global_store(r):
     pathtods=f'curr_{r}m.zarr'
+    #if r ==50:
+    #    pathtods=f'curr_{r}m_rech.zarr'
     pathtofut=f'planned_{r}m.zarr'
     logger.info(f'using global store {pathtods}')
     super_ds=open_zarr(rootdir+pathtods) 
+    logger.debug(f'zarr chunks:   {super_ds.chunks}')
     planned_ds= open_zarr(rootdir+pathtofut)
     return super_ds, planned_ds
 
@@ -585,24 +588,24 @@ def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport):
             super_ds, planned_ds=global_store(r)
             logger.info('global store loaded')
             if plan['existing']:
-                logger.debug('Cropping super ds')
+                logger.info('Cropping super ds')
                 ds= crop_ds(super_ds, viewdata)
                 name_list=dataset['name list'][1:] #### remove Achintraid because only NaN for some reason
-                logger.debug('Cropped')
+                logger.info('Cropped')
                 ds=ds[name_list]
-                logger.debug('Scaling the super ds with parameters')
+                logger.info('Scaling the super ds with parameters')
                 for i in range(len(name_list)):                    
                     ds[name_list[i]].values *=dataset['coeff'][i]
-                logger.debug('Scaled')    
+                logger.info('Scaled')    
                 if plan['planned']:
-                    logger.debug('adding planned farms')
+                    logger.info('adding planned farms')
                     planned_ds=crop_ds(planned_ds, viewdata)
                     name_list=np.hstack((name_list,plan['checklist']))
                     for var in plan['checklist']:
                         ds[var]=planned_ds[var]*dataset['lice/egg factor']
-                    logger.debug('added and scaled planned farms')
+                    logger.info('added and scaled planned farms')
             else:
-                logger.debug('adding only planned farms')
+                logger.info('adding only planned farms')
                 if len(plan['checklist'])>0:
                     ds=crop_ds(planned_ds[plan['checklist']]*dataset['lice/egg factor'], viewdata)
                     name_list=plan['checklist']
