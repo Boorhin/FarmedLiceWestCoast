@@ -121,7 +121,7 @@ def mk_img(ds, span, cmp):
             }]
     arr= arr.rio.write_crs(3857, inplace=True).rio.clip(polyg, invert=True, crs=3857)
     logger.info('data cropped')  
-    return tf.shade(arr.where(arr>0), #.load()
+    return tf.shade(arr.where(arr>0), 
                     cmap=cmp, how='linear',
                     span=span).to_pil()
 
@@ -590,7 +590,7 @@ def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport):
             if plan['existing']:
                 logger.info('Cropping super ds')
                 ds= crop_ds(super_ds, viewdata)
-                name_list=dataset['name list'][1:] #### remove Achintraid because only NaN for some reason
+                name_list=dataset['name list'] # [1:] #### remove Achintraid because only NaN for some reason
                 logger.info('Cropped')
                 ds=ds[name_list]
                 logger.info('Scaling the super ds with parameters')
