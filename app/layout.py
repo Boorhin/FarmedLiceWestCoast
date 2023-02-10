@@ -78,7 +78,13 @@ def init_the_figure():
     # variables=json.loads(init)
     fig= go.Figure()
     fig.add_trace(go.Scatter(x=[None], y=[None],marker=go.scatter.Marker(
-                        #colorscale=mk_colorscale(fire),
+                        colorbar=dict( 
+                            title= dict( 
+                                text="copepodid/m²/day", #r'$copepodid.m^{-2}.day^{-1}$',
+                                side='right'
+                                ), 
+                            orientation='v', # style={'writing-mode':'vertical-rl'},
+                            ),
                         cmax=span[1],
                         cmin=span[0],
                         showscale=True,
@@ -187,30 +193,9 @@ def make_base_figure(farm_data, center_lat, center_lon, span, cmp, template):
     logger.info('figure done.')
     return fig
 
-def comment_card(start, end):
-   return dbc.Card(
-      dbc.CardBody([
-                dbc.Alert('The size of the disks is proportional to the biomass.', color='primary'),
-                dbc.Alert('Hover a farm for more information.', color='secondary'),
-                dbc.Alert('Colorscale is the average density of copepodid per sqm from {} to {}.'.format(start,end), color='primary'),
-                dbc.Alert('A density of 2 copepodid/sqm/day leads to a 30% mortality of wild smolts each day.', color='warning')
-            ])
-            )
-def legend_card():
-    return dbc.Card([
-                dbc.CardHeader('Legend'),
-                dbc.CardBody([
-                    html.Span([
-                dbc.Badge('Processed farms', color="success",pill=True),
-                # dbc.Badge('Farms awaiting processing', color='info',pill=True),
-                dbc.Badge('Farms included in the study', color='light', pill=True),
-                    ]),
-                ])
-            ])
-
 def tuning_card():
     return dbc.Card([
-        dbc.CardHeader('Adjust biomass and lice infestation'),
+        
         dbc.CardBody([
             dbc.Row([
                 dbc.Col([
@@ -225,7 +210,23 @@ def tuning_card():
                         ),
                     dbc.Tooltip(''' 
                         Decrease or increase all the fish farm biomasses.''',target='biomass_knob'),
-                    ]),
+
+                    daq.BooleanSwitch(
+                                        id='egg_toggle',
+                                        on=True,
+                                        label='Nauplii production model',
+                                        ),
+                    html.P(
+                                        id='egg_toggle_output',
+                                        style={'text-align':'center'}
+                                        ),
+                    dbc.Tooltip('''Choose an egg hatching model suits best. 
+                                        Rittenhouse et al. based on experimental data, 
+                                        produced an equation that suggested 16 eggs released per hour per adult copepodid. 
+                                        Stien et al. 2005, based on model matching of real data suggest 30 eggs /hour.''', 
+                                        target= 'egg_toggle',
+                                        placement='bottom'),          
+                    ]),     
                 dbc.Col([
                     daq.Knob(
                         id='lice_knob',
@@ -256,101 +257,75 @@ def tuning_card():
             ])
         ])
 
+def select_contributors():
+    return dbc.Card([
+                dbc.CardBody([
+                    dbc.Row([
+                    dbc.Col([
+                        daq.BooleanSwitch(id='existing_farms_toggle', 
+                            on=True,
+                            label='Existing farms  (green bubbles)'),
+                        dbc.Tooltip('Activate this toggle to visualise the lice density from existing farms',
+                            target='existing_farms_toggle'),
+                        daq.BooleanSwitch(id='future_farms_toggle',
+                            on=False,
+                            label='Planned farms  (blue bubbles)'),
+                        dbc.Tooltip('''Activate this toggle to visualise the lice density from planned farms. 
+                                You also have to decide which of these farms to include in the dataset.''',
+                            target='future_farms_toggle'),
+                         ]),
+                    dbc.Col([
+                        html.Div([
+                            dbc.Button("Select planned farms to include",
+                                id= "collapse_button_select_future",
+                                n_clicks=0),
+                            dbc.Collapse (
+                                dcc.Checklist(
+                                    id='planned_checklist',
+                                # options=future_farms['Name'],
+                                    inline=False,
+                                    labelStyle={'display': 'block'},
+                                    ),
+                                id= "collapse_select_future",
+                                is_open=False,
+                                ),
+                            ],
+                        className="d-grid gap-2 col-9 mx-auto")
+                        ],),
+                        ])
+                    ]),
+                ]),
+
 def mk_map_pres(): #
     return dbc.Row([
         dbc.Col([
-            dbc.Card([
-                dbc.CardHeader('Compute a new density map'),
-                dbc.CardBody([
-                    html.Div(
-                        [dbc.Button('Update density map',
-                            id='trigger', 
-                            n_clicks=0),],
-                        className="d-grid gap-2 d-md-flex justify-content-md-center",
-                        ),
-                    dbc.Tooltip('''
-                        This updates or creates the lice density map according to the parameter you have selected. 
-                        You can simulate a global change of the farm biomasses, the global lice infestation levels, 
-                        use the reported lice from the best data we have and scale the color range. 
-                        The map you produce will depend of the area visible in the map and the level of zoom. 
-                        The resolution available are 800-400-200-100-50 and will change automatically according 
-                        to the zoom in the viewport. If you change a parameter, you will have to press this button 
-                        to see the change. Be patient as this involves very heavy computations and can take a while to refresh. 
-                        ''',
-                        target = 'trigger'),
-                    ])
-                ]),
-            dbc.Card([
-                dbc.CardHeader('Select the contributors to the map'),
-                dbc.CardBody([
-                    daq.BooleanSwitch(id='existing_farms_toggle', 
-                        on=True,
-                        label='Existing farms'),
-                    dbc.Tooltip('Activate this toggle to visualise the lice density from existing farms',
-                        target='existing_farms_toggle'),
-                    daq.BooleanSwitch(id='future_farms_toggle',
-                        on=False,
-                        label='Planned farms'),
-                    dbc.Tooltip('''Activate this toggle to visualise the lice density from planned farms. 
-                                You also have to decide which of these farms to include in the dataset.''',
-                        target='future_farms_toggle'),
-                    ])
-                ]),
-            dbc.Card([
-                            dbc.CardHeader('Choose the egg production model'),
-                            dbc.CardBody(
-                                dbc.Row([
-                                    html.Div([
-                                    daq.BooleanSwitch(
-                                        id='egg_toggle',
-                                        on=True
-                                        ),
-                                    html.Div(
-                                        id='egg_toggle_output',
-                                        style={'text-align':'center'}
-                                        ),]),
-                                    dbc.Tooltip('''Choose which egg production model suits best. 
-                                                Rittenhouse et al. based on experimental data, 
-                                                produced an equation that suggested 16 eggs released per hour per adult copepodid. 
-                                                Stien et al. 2005, based on model matching of real data suggest 30 eggs /hour.''', 
-                                        target= 'egg_toggle',
-                                        placement='bottom'),
-                                ])
-                            )
-                        ])
-            ],width=3),
+            html.Div([
+                dbc.Button("Select the contributors to the map",
+                    id="collapse_button_select_contributor",
+                    n_clicks=0),
+                dbc.Collapse(
+                    select_contributors(),
+                    id="collapse_select_contributor",
+                    is_open=False,
+                    ),
+                ], className="d-grid gap-2 col-12 mx-auto")
+            
+            
+            ],md=6, xs= 11),
+        
         dbc.Col([
-            dbc.Card([
-                dbc.CardHeader('Select the planned farms to include'),
-                dbc.CardBody([
-                    html.H5("Planned farms appear as blue bubbles"),
-                    dcc.Checklist(
-                                id='planned_checklist',
-                                # options=future_farms['Name'],
-                                inline=False,
-                                labelStyle={'display': 'block'},
-                                ),     
-                      ]),
-                 ]),
-            dbc.Card([
-                dbc.CardHeader('Selected Farm'),
-                dbc.CardBody([
-                    html.Div([
-                        html.P(id='name_farm'),
-                        dbc.Button('Inspect farm data',
-                               id='inspect-button', 
-                               n_clicks=0),],
-                        className="d-grid gap-2 d-md-flex justify-content-md-center",
-                        ),
-                    dbc.Tooltip('''
-                        Inspect the active farm you selected on the map''',
-                        target='inspect-button'),
-                    ]),
-                ]),
-            ],width=3),
-        dbc.Col([
-            tuning_card()
-        ],width=6),
+            html.Div([
+                dbc.Button('Adjust biomass and lice infestation',
+                    id="collapse_button_tune",
+                    n_clicks=0),
+                dbc.Collapse(
+                    tuning_card(),
+                    id="collapse_tune",
+                    is_open=False,
+                    ),
+                ], className="d-grid gap-2 col-12 mx-auto")
+            
+        ],md=6, xs=11),
     ]),
 
 def tab1_layout():
@@ -363,10 +338,10 @@ def tab1_layout():
         dbc.Card([
             dbc.CardBody([
             dbc.Row([
-                dbc.Col([
                     dcc.Graph(
                         id='heatmap',
-                        figure=init_the_figure()
+                        figure=init_the_figure(),
+                        #mathjax=True,
                         ),
                     dcc.Loading(
                         id='figure_loading',
@@ -374,26 +349,47 @@ def tab1_layout():
                         type='graph',
                         fullscreen=True
                         ),
-                    ], width=9),
+                ]),
+            dbc.Row([
                 dbc.Col([
-                    html.P(
-                                children='(copepodid/sqm/day)',
-                                style={'writing-mode':'vertical-rl'},
-                                ),
-                    ], width=1),
+                    html.Div(
+                        [dbc.Button('',
+                            id='trigger', 
+                            n_clicks=0),
+                    dbc.Tooltip('''
+                        This updates or creates the lice density map according to the parameter you have selected. 
+                        You can simulate a global change of the farm biomasses, the global lice infestation levels, 
+                        use the reported lice from the best data we have and scale the color range. 
+                        The map you produce will depend of the area visible in the map and the level of zoom. 
+                        The resolution available are 800-400-200-100-50 and will change automatically according 
+                        to the zoom in the viewport. If you change a parameter, you will have to press this button 
+                        to see the change. Be patient as this involves very heavy computations and can take a while to refresh. 
+                        ''',
+                        target = 'trigger'),
+                        dbc.Button('Select a farm on the map for inspection',
+                               id='inspect-button', 
+                               n_clicks=0,
+                               disabled=True),],
+                        className="d-grid gap-2 col-11 mx-auto",
+                        ),
+                    dbc.Tooltip('''
+                        Inspect the active farm you selected on the map''',
+                        target='inspect-button'),        
+                    ], xs= 11, md=3),
                 dbc.Col([
-                     html.P('Scale range'),
-                     dcc.RangeSlider(
+                    dcc.Markdown(r'Colormap range in $copepodid.m^{-2}.day^{-1}$',
+                    mathjax=True),
+                    dcc.RangeSlider(
                                 id='span-slider',
                                 min=0,
                                 max=10,
                                 step=0.25,
                                 marks={n:'%s' %n for n in range(11)},
                                 value=[0,0.75],
-                                vertical=True,
+                                vertical=False,
                                 )
-                    ], width=1)
-                ], align='center', className="g-0")
+                    ], xs= 12,md=9),
+                ], align='center'),
             ])
         ]),
         dbc.Card([
@@ -434,7 +430,7 @@ def tab1_layout():
                     dbc.Col([
                         daq.LEDDisplay(
                             id='LED_egg',
-                            label='Daily release of sealice nauplii from fish farms',
+                            label='Hourly release of sealice nauplii from fish farms',
                             color='#f89406',
                             backgroundColor='#7a8288',
                             ), 
@@ -499,7 +495,10 @@ def init_farm_plot():
                     showgrid=False, secondary_y=False)
     fig_p.update_yaxes(title='Reported average lice/fish',
                     showgrid=False, secondary_y=True)                
-    #fig_p.update_layout(
+    fig_p.update_layout(
+        legend=dict(orientation='h'),
+        )
+    
         #margin=dict(b=15, l=15, r=5, t=5),
         #template=mk_template(template)
     #    )
@@ -521,27 +520,31 @@ def togglingyears():
     
 def mk_farm_layout(name, marks_biomass,marks_lice, data):
     farm_lay= [dbc.Col([
-    		    dbc.Row(
-                	daq.BooleanSwitch(
-                 	   id={'type':'switch','id':data['ID']},
-                	    on=True,
-                	    label="Toggle farm on/off",
-                	    labelPosition="top"
-                	    )),
-
-              	     dbc.Row([
               	          html.P('Site identification number (GSID): '+data['GSID']),
               	          html.P('SEPA Reference: ' + data['Site ID SEPA']),
               	          html.P('Marine Scotland Reference: ' + data['Site ID Scot env']),
               	          html.P('Marine Scotland site name: ' + data['Name MS']),
               	          #html.P('Production Year: '+ data['Prod year']),
               	          html.P('Operator: ' + data['operator']),
-              	          ]),
-                   ], width=3),
+                   ], md=3, xs=12),
             dbc.Col([
                 html.H3('Modelled Peak Biomass {} tons'.format(data['reference biomass'])),
                 html.H3('Average lice per fish {}'.format(np.round(data['mean lice'],2))),
-                html.H3('Tune Farm biomass: (DESACTIVATED)'),
+            ],md=8, xs=12)
+            ]
+    return farm_lay
+
+def microtuning(data):
+
+    layout= [
+    dbc.Row(
+                	daq.BooleanSwitch(
+                 	   id={'type':'switch','id':data['ID']},
+                	    on=True,
+                	    label="Toggle farm on/off",
+                	    labelPosition="top"
+                	    )),
+     html.H3('Tune Farm biomass: (DESACTIVATED)'),
                 dcc.Slider(
                     id={'type':'biomass_slider','id':data['ID']},
                     step=0.05,
@@ -561,9 +564,8 @@ def mk_farm_layout(name, marks_biomass,marks_lice, data):
                     included=False,
                     tooltip={"placement": "bottom"},
                     disabled=True,
-                    )],
-            width=8)]
-    return farm_lay
+                    ),]
+    return layout
     
 def tab3_layout():
     return dbc.Card([
@@ -616,8 +618,8 @@ Once the model has been run, the number of copepodid in each particle through th
   * You can tune the infestation rates (lice per fish). The good practice standards are of 0.5 lice per farmed fish. It you look at the reported infestation rates, you will see that it could be much higher during outbreaks. You can actually toggle the switch **Use and Extrapolate reported lice** that will try to find reported lice numbers for the may of the year you select. If it fails, it will take the average lice infestation for that farm and if the farm has never reported, it will take 0.5 as a default value.
   * You can change the egg production model, meaning the number of nauplii produced per hour by each louse. Most modellers use the work of Stien et al. (2005) but Rittenhouse et al. (2016) is an alternative one you can test too.
   * You can add the contribution to the density maps of planned farms based on their declared max biomass and a standard lice density of 0.5 (except if you modify the global infestation levels).
-  * You can change the resolution of the map you display. The map resolution varies as a function of the viewport from 800m to 50m. To limit the resource used, only the area visible in the map viewport is rendered. To visualise another area, you will have to press the **update density map** again. When you browse the map, notifications will indicate the resolution you would have if you compute the map.
-  * You can generate density maps with the button **Update density map** this will take into account the parameters aforementioned. If you change, the year, the global biomass, the global lice infestation, the wiewport or try to use reported biomass you will need to refresh the map to see the updated parameters.
+  * You can change the resolution of the map you display. The map resolution varies as a function of the viewport from 800m to 50m. To limit the resource used, only the area visible in the map viewport is rendered. To visualise another area, you will have to press the **Render density map** again. When you browse the map, notifications will indicate the resolution you would have if you compute the map.
+  * You can generate density maps with the button **Render density map** this will take into account the parameters aforementioned. If you change, the year, the global biomass, the global lice infestation, the wiewport or try to use reported biomass you will need to refresh the map to see the updated parameters.
   * You can save a screenshot of the map with the button appearing in the upper-right of the map **Download plot as png**.
   ![Make a screenshot](assets/screenshoting.png)
   

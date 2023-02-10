@@ -31,11 +31,12 @@ from datashader import transfer_functions as tf
 from datetime import datetime, timedelta
 from os import path, environ
 import dash
-# from dash import dcc as dcc
+from dash import dcc as dcc
 from dash.exceptions import PreventUpdate
-#from dash import html as html
-# from dash.dependencies import Input, Output, State, MATCH, ALL
-from dash_extensions.enrich import Output, Input, html, State, MATCH, ALL, DashProxy, LogTransform, DashLogger, dcc # FileSystemStore #ServersideOutput, ServersideOutputTransform, 
+from dash import html as html
+from dash import Dash
+from dash.dependencies import Input, Output, State, MATCH, ALL
+# from dash_extensions.enrich import Output, Input, html, State, MATCH, ALL, DashProxy, LogTransform, DashLogger, dcc # FileSystemStore #ServersideOutput, ServersideOutputTransform, 
 import dash_bootstrap_components as dbc
 from dash_bootstrap_templates import ThemeSwitchAIO, load_figure_template
 import dash_mantine_components as dmc
@@ -43,7 +44,7 @@ import dash_mantine_components as dmc
 import dash_daq as daq
 
 from flask_caching import Cache
-from dash.exceptions import PreventUpdate
+# from dash.exceptions import PreventUpdate
 from celery import Celery
 
 from layout import *
@@ -120,7 +121,7 @@ def mk_img(ds, span, cmp):
             }]
     arr= arr.rio.write_crs(3857, inplace=True).rio.clip(polyg, invert=True, crs=3857)
     logger.info('data cropped')  
-    return tf.shade(arr.where(arr>0).load(),
+    return tf.shade(arr.where(arr>0), #.load()
                     cmap=cmp, how='linear',
                     span=span).to_pil()
 
@@ -131,13 +132,13 @@ def select_zoom(zoom):
     '''
     if zoom <6:
         r=800
-    elif zoom>9:
-        r= 50
-    elif 6<=zoom<7:
+    #elif zoom>=11:
+    #    r= 50
+    elif 6<=zoom<7.75:
         r=400
-    elif 7<=zoom<8:
+    elif 7.75<=zoom<8.8:
         r=200
-    elif 8<=zoom<9:
+    elif zoom>=8.8: #<11:
         r=100
     return r
 
@@ -258,10 +259,10 @@ cacheconfig={'CACHE_TYPE': 'RedisCache',
 
 ######### APP DEFINITION ############
 #my_backend = FileSystemStore(cache_dir="/tmp")
-app = DashProxy(__name__,
+app = Dash(__name__,
                 external_stylesheets=[url_theme1],#, dbc_css
                 meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1, maximum-scale=1.2, minimum-scale=0.5"}],
-                transforms=[LogTransform()] #, ServersideOutputTransform(backend=my_backend)
+                #transforms=[] #LogTransform(), ServersideOutputTransform(backend=my_backend)
                 )
 server=app.server
 #### need to make a way to swap between localhost and 
@@ -315,12 +316,10 @@ def global_store(r):
 @app.callback(
      Output('init', 'data'),
      Input(ThemeSwitchAIO.ids.switch("theme"), "value"),
-     log = True
 )
-def initialise_var(toggle, dash_logger: DashLogger):
+def initialise_var(toggle):
     logger.info('Preparing dataset')
     variables={}
-    dash_logger.info('Initialising ...', autoClose=autocl)
     master='curr_800m.zarr'
     super_ds=open_zarr(rootdir+master)
     variables['All_names']=np.array(list(super_ds.keys()))
@@ -335,7 +334,6 @@ def initialise_var(toggle, dash_logger: DashLogger):
     for mess, ok in zip(typos, correct):
         lice_data[ok].values[id_c]=lice_data[mess].values[id_c]
         lice_data=lice_data.drop(mess)
-    # logger.debug(f'lice data:    {lice_data.to_dict()}')
     variables['lice_data']=lice_data.to_dict()
     variables['lice time']=variables['lice_data']['coords']['time']['data']
     csvfile='biomasses.csv'
@@ -350,10 +348,8 @@ def initialise_var(toggle, dash_logger: DashLogger):
 @app.callback(
     Output('theme_store', 'data'),
     Input(ThemeSwitchAIO.ids.switch("theme"), "value"),
-    log= True 
 )
-def record_theme(toggle, dash_logger: DashLogger):
-    dash_logger.info('Switching themes', autoClose=autocl)
+def record_theme(toggle):
      ### toggle themes    
     theme={}
     theme['template'] = template_theme1 if toggle else template_theme2
@@ -364,10 +360,8 @@ def record_theme(toggle, dash_logger: DashLogger):
 @app.callback(
     Output('egg_toggle_output','children'),
     Input('egg_toggle','on'),
-    log=True
 )
-def toggle_egg_models(eggs, dash_logger: DashLogger):
-    dash_logger.info('Egg production model changed', autoClose=autocl)
+def toggle_egg_models(eggs):
     if eggs:
         return 'Stien et al. (2005)'
     else:
@@ -379,16 +373,13 @@ def toggle_egg_models(eggs, dash_logger: DashLogger):
     Input('egg_toggle','on'),
     Input('lice_meas_toggle','on'),
     Input('init','data'),],
-    log=True
     )
-def compute_lice_data(liceC, egg, meas, init, dash_logger: DashLogger):
+def compute_lice_data(liceC, egg, meas, init):
     logger.info('scaling lice')
     logger.debug(f'egg is {egg}')
-    dash_logger.info('Lice data are being scaled', autoClose=autocl)
     variables=json.loads(init)
     # modify egg model from Rittenhouse (16.9) to Stein (30)
     if egg:
-        # lices *= 30/16.9
         c_lice=30/16.9
     else:
         c_lice=1
@@ -405,27 +396,32 @@ def compute_lice_data(liceC, egg, meas, init, dash_logger: DashLogger):
     
 @app.callback(
     Output('view_store','data'),
+    Output('trigger','children'),
     Input('heatmap', 'relayoutData'),
-    log=True
     )
-def store_viewport(relay, dash_logger: DashLogger):
-    #dash_logger.info('Updating viewport data', autoClose=autocl)
+def store_viewport(relay):
     logger.debug('Storing viewport data')
     logger.debug(f'relay:    {relay}')
-    if relay is not None:
-        zoom=relay['mapbox.zoom']
-        bbox=relay['mapbox._derived']['coordinates']
-        dash_logger.info(f'Potential heatmap resolution :   {select_zoom(zoom)}m', autoClose=autocl)
-    else:
-        zoom=5.
-        bbox=[[-16., 60.], 
+    default_view=[[-16., 60.], 
             [5., 60.], 
             [5., 53.], 
             [-16., 53.]]
+    if relay is not None:
+        if 'mapbox.zoom' in relay.keys():
+            zoom=relay['mapbox.zoom']
+        else:
+            zoom=5.
+        if 'mapbox._derived' in relay.keys():
+            bbox=relay['mapbox._derived']['coordinates']
+        else:
+            bbox=default_view
+    else:
+        zoom=5.
+        bbox=default_view
     corners=calculate_edge(np.array(bbox))
-    #corners['bbox']=bbox
     corners['zoom']=zoom
-    return json.dumps(corners, cls= JsonEncoder)
+    res=select_zoom(zoom)
+    return json.dumps(corners, cls= JsonEncoder), f'Render density map at {res}m resolution'
     
         
 
@@ -441,10 +437,8 @@ def store_viewport(relay, dash_logger: DashLogger):
     [   
     State('lice_meas_toggle','on')
     ],
-    log=True
 )
-def mk_bubbles(year, biomC,lice_tst, init, liceData, meas, dash_logger: DashLogger):
-    dash_logger.info('Scaled biomass according to chosen parameters', autoClose=autocl)
+def mk_bubbles(year, biomC,lice_tst, init, liceData, meas):
     liceData=liceData[0]
     variables=json.loads(init)
     activated_farms= np.ones(len(variables['All_names']), dtype='bool')
@@ -460,8 +454,6 @@ def mk_bubbles(year, biomC,lice_tst, init, liceData, meas, dash_logger: DashLogg
                                                      np.array(variables['times'],dtype='datetime64[D]'), 
                                                      np.array(variables['ref_biom']), variables['Ids'], 
                                                      np.array(variables['lice time'], dtype= "datetime64[D]"),meas, year)
-
-    #dash_logger.info('Biomass and lice scaled', autoClose=autocl)
     name_list=np.array(list(variables['farm_data'].keys()))[idx]    
     ##### update discs farms
     current_biomass=[variables['farm_data'][farm]['reference biomass']*
@@ -488,23 +480,19 @@ def mk_bubbles(year, biomC,lice_tst, init, liceData, meas, dash_logger: DashLogg
     Output('LED_egg','value')],
     #Input('bubbles','modified_timestamp'),
     Input('bubbles','data'),
-    log=True
 )
-def populate_LED(bubble_data, dash_logger: DashLogger):
+def populate_LED(bubble_data):
     logger.info('modifying LED values')
-    dash_logger.info('Modifying LED values', autoClose=autocl)
     dataset= json.loads(bubble_data)
-    return int(sum(dataset['coeff'])*1000), int(dataset['all lice'])
+    return int(sum(dataset['coeff'])*1000), int(dataset['all lice']/24)
     
 @app.callback(
     Output('planned_store','data'),
     Input('future_farms_toggle','on'),
     Input('planned_checklist','value'),
     Input('existing_farms_toggle','on'),
-    log=True
 )
-def store_planned_farms(toggle_planned, checklist, toggle_existing, dash_logger: DashLogger):
-    dash_logger.info('Storing selected planned farms', autoClose=autocl)
+def store_planned_farms(toggle_planned, checklist, toggle_existing):
     return [{'planned':toggle_planned, 'checklist':checklist, 'existing': toggle_existing}]
 
 @app.callback(
@@ -525,30 +513,23 @@ def init_checklist(init):
     Input('theme_store',"data"),
     Input('planned_store', 'data'),  
     Input('span-slider','value') ,
-    #Input('bubbles','modified_timestamp'),
     Input('trigger','n_clicks'),
     Input('init','data'),  
     Input('bubbles','data'),  
     ],
     [  
     State('heatmap','figure'),
-    
-    #State('heatmap', 'figure'),
     State('view_store','data')   
     ],
-    log=True
 )
-def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport, dash_logger: DashLogger): #, bubble_tmst
-    dash_logger.info('Updating the map', autoClose=autocl)
+def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport): 
     logger.info('drawing the map')
-    # logger.debug(f'figure:     {fig}')
     ctx = dash.callback_context
     # variables=variables[0]
     #dataset=dataset[0]
     #viewdata=viewdata[0]
     #theme=theme[0]
     plan=plan[0]
-    # logger.debug(ctx.triggered)
     dataset= json.loads(bubble_data)
     viewdata= json.loads(viewport)
     theme=json.loads(theme)
@@ -569,8 +550,6 @@ def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport, dash
     fig['data'][3]['marker']['size']=[l[2] for l in variables['future_farms']]
     
     ### draw bubbles 
-    #if ctx.triggered[0]['prop_id'] == 'bubbles.data':
-    # dash_logger.info('Updating farm discs', autoClose=autocl)  
     fig['data'][1]=go.Scattermapbox(
                                 lat=[variables['farm_data'][farm]['lat'] for farm in dataset['name list']],
                                 lon=[variables['farm_data'][farm]['lon'] for farm in dataset['name list']],
@@ -595,14 +574,11 @@ def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport, dash
                                     showscale=False,
                                     )
     fig['data'][1]['name']=f"Processed with biomass of may {dataset['year']}"                        
-        
-    dash_logger.info('Farm discs updated', autoClose=autocl)  
     
     ### update heatmap
     if ctx.triggered[0]['prop_id'] == 'trigger.n_clicks' or \
        ctx.triggered[0]['prop_id'] =='span-slider.value': 
         if plan['existing'] or plan['planned']:
-            dash_logger.info('Updating the density map', autoClose=autocl)
             logger.info('rasterizing the heatmap')
             r = select_zoom(viewdata['zoom'])
             logger.debug('zoom: {}, resolution: {}'.format(viewdata['zoom'], r))
@@ -631,10 +607,8 @@ def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport, dash
                     ds=crop_ds(planned_ds[plan['checklist']]*dataset['lice/egg factor'], viewdata)
                     name_list=plan['checklist']
                 else:
-                    dash_logger.warning('No farm choosen in the checklist')
                     raise PreventUpdate
             coordinates=get_coordinates(ds)
-            # logger.debug(f'subds:      {ds}')
             logger.debug(f'Selected farms for the map:   {name_list}')
             logger.debug(f'coordinates:     {coordinates}')
             fig['layout']['mapbox']['layers']=[{
@@ -644,38 +618,40 @@ def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport, dash
                                         "coordinates": coordinates
                                     },]
             logger.info('raster loaded')
-            dash_logger.info('Density map updated', autoClose=autocl)
         else:
-            dash_logger.warning('Neither existing or planning farms are toggled on')
             raise PreventUpdate
-        #    fig['layout']['mapbox']['layers']=[]
-
     return fig, None
     
 @app.callback(
-    Output('name_farm', 'children'),
+    Output('inspect-button', 'children'),
+    Output('inspect-button', 'disabled'),
     Input('heatmap','clickData'),
-    log=True)
-def grab_farm(select, dash_logger: DashLogger):
+    Input('init','data'),
+)
+def grab_farm(select, data):
     if select is None:
         raise PreventUpdate
-    logger.debug (f"{select['points'][0]['text']} was selected")
-    dash_logger.info(f"You have selected the farm {select['points'][0]['text']}.", autoClose=autocl)
-    return select['points'][0]['text']
+    else: 
+        name= select['points'][0]['text']
+        logger.debug (f"{name} was selected")
+        variables=json.loads(data)
+        l=[l[1] for l in variables['future_farms']]
+        if name in l:
+            return f'{name} has no record', True
+        else:
+            return f'Inspect {name} data', False 
 
 @app.callback(
     Output('all_tabs', 'active_tab'),
     Output('dropdown_farms', 'value'),
     Input('inspect-button', 'n_clicks'),
-    State('name_farm', 'children'),
-    log=True
+    State('inspect-button', 'children'),
     )
-def inspect_farm(click, name, dash_logger: DashLogger):
+def inspect_farm(click, name):
     logger.debug('Inspecting farm')
-    if name is None:
-        dash_logger.warning('No farm has been selected on the map', autoClose=autocl)
-        raise PreventUpdate
-    return 'tab-graph', name
+    if click is None or name== 'Select a farm on the map for inspection':
+        raise PreventUpdate   
+    return 'tab-graph', name[8:-5]
 
 @app.callback(
     Output('dropdown_farms', 'options'),
@@ -696,20 +672,16 @@ def populate_dropdown(init):
     Input('theme_store', "data"),
     Input('init','data'),
     State('progress-curves','figure'),
-    log= True
 )
-def farm_inspector(name, theme, init, curves, dash_logger: DashLogger):
-    #theme=theme[0]
+def farm_inspector(name, theme, init, curves):
     theme=json.loads(theme)
     variables=json.loads(init)
     template = theme['template']    
     logger.debug(f'curve name: {name}')  
     time_range=   np.array([variables['times'][0],variables['lice_data']['coords']['time']['data'][-1]], dtype='datetime64[D]')#convert_dates()
     if not name:
-        dash_logger.warning('No farm selected', autoClose=autocl)
         raise PreventUpdate
     else:
-        dash_logger.info(f'Computing curve for {name}', autoClose=autocl)
         for i in range(4): # try to 0 de values
             curves['data'][i]['x']=[None]
             curves['data'][i]['y']=[None]
@@ -726,13 +698,41 @@ def farm_inspector(name, theme, init, curves, dash_logger: DashLogger):
         logger.debug(curves)
         return curves, mk_farm_layout(name, marks_biomass,marks_lice, variables['farm_data'][name])
 
-#@app.callback(
-#    Output('logs', 'value'),
-#    Input('interval', 'n_intervals')
-#)
-#def update_output(n):
-#    return ('\n'.join(dashLoggerHandler.queue))
+@app.callback(
+    Output("collapse_select_future", "is_open"),
+    Input("collapse_button_select_future",'n_clicks'),
+    Input("future_farms_toggle",'on'),
+    State("collapse_select_future", "is_open"),
+)
+def open_selected_future_farms(n, switch, is_open):
+    logger.debug('Collapsing future')
+    ctx = dash.callback_context
+    if ctx.triggered[0]['prop_id'] == 'collapse_button_select_future.n_clicks':
+        return not is_open
+    if ctx.triggered[0]['prop_id'] =="future_farms_toggle.on":
+        return True
+    
+@app.callback(
+    Output("collapse_select_contributor", "is_open"),
+    Input("collapse_button_select_contributor",'n_clicks'),
+    State("collapse_select_contributor", "is_open"),
+)
+def open_selected_future_farms(n, is_open):
+    logger.debug('Collapsing contributor')
+    if n:
+        return not is_open
+    return is_open
 
+@app.callback(
+    Output("collapse_tune", "is_open"),
+    Input("collapse_button_tune",'n_clicks'),
+    State("collapse_tune", "is_open"),
+)
+def open_selected_future_farms(n, is_open):
+    logger.debug('Collapsing tuning')
+    if n:
+        return not is_open
+    return is_open
 
 if __name__ == '__main__':
     app.run_server(host='0.0.0.0', port=8050, debug=True)

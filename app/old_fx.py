@@ -82,3 +82,25 @@ def init_the_figure(variables, dash_logger: DashLogger):
                     )
     logger.info('figure done.')
     return [fig]# , fig   
+    
+    
+def comment_card(start, end):
+   return dbc.Card(
+      dbc.CardBody([
+                dbc.Alert('The size of the disks is proportional to the biomass.', color='primary'),
+                dbc.Alert('Hover a farm for more information.', color='secondary'),
+                dbc.Alert('Colorscale is the average density of copepodid per sqm from {} to {}.'.format(start,end), color='primary'),
+                dbc.Alert('A density of 2 copepodid/sqm/day leads to a 30% mortality of wild smolts each day.', color='warning')
+            ])
+            )
+def legend_card():
+    return dbc.Card([
+                dbc.CardHeader('Legend'),
+                dbc.CardBody([
+                    html.Span([
+                dbc.Badge('Processed farms', color="success",pill=True),
+                # dbc.Badge('Farms awaiting processing', color='info',pill=True),
+                dbc.Badge('Farms included in the study', color='light', pill=True),
+                    ]),
+                ])
+            ])
