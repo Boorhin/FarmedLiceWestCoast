@@ -1,3 +1,17 @@
+@app.callback(
+    Output("collapse_select_future", "is_open"),
+    Input("collapse_button_select_future",'n_clicks'),
+    Input("future_farms_toggle",'on'),
+    State("collapse_select_future", "is_open"),
+)
+def open_selected_future_farms(n, switch, is_open):
+    logger.debug('Collapsing future')
+    ctx = dash.callback_context
+    if ctx.triggered[0]['prop_id'] == 'collapse_button_select_future.n_clicks':
+        return not is_open
+    if ctx.triggered[0]['prop_id'] =="future_farms_toggle.on":
+        return True
+
 
 
 @app.callback(

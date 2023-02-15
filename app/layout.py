@@ -257,6 +257,19 @@ def tuning_card():
             ])
         ])
 
+def mk_modal(origin, is_open):
+   txt=''
+   if "no toggle" in origin:
+       txt="Select at least one of the toggle from existing or planned farms.\n"
+   if "no future" in origin:
+       txt += "At least one planned farm needs to be selected"
+   modal= dbc.Modal([
+       dbc.ModalHeader(dbc.ModalTitle('No farm selected')),
+       dbc.ModalBody(txt)],
+       id="modal_checklist",
+       is_open=is_open)
+   return modal
+
 def select_contributors():
     return dbc.Card([
                 dbc.CardBody([
@@ -275,22 +288,18 @@ def select_contributors():
                             target='future_farms_toggle'),
                          ]),
                     dbc.Col([
-                        html.Div([
-                            dbc.Button("Select planned farms to include",
-                                id= "collapse_button_select_future",
-                                n_clicks=0),
-                            dbc.Collapse (
+                        dbc.Card([
+                            dbc.CardHeader("Select planned farms to include"),
+                            dbc.CardBody([
                                 dcc.Checklist(
                                     id='planned_checklist',
                                 # options=future_farms['Name'],
                                     inline=False,
                                     labelStyle={'display': 'block'},
                                     ),
-                                id= "collapse_select_future",
-                                is_open=False,
-                                ),
-                            ],
-                        className="d-grid gap-2 col-9 mx-auto")
+                                ]),
+                            ])
+                        
                         ],),
                         ])
                     ]),
