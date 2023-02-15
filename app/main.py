@@ -185,7 +185,19 @@ def fetch_biomass(farm_data, lice_data, activated_farms, biomass_factor, lice_fa
                 
     return activated_farms, biomass_factor, lice_factor, ref_biom      
 
-
+def render(fig, ds, span, theme, name_list):
+     logger.info('Rendering')
+     coordinates=get_coordinates(ds)
+     logger.debug(f'Selected farms for the map:   {name_list}')
+     logger.debug(f'coordinates:     {coordinates}')
+     fig['layout']['mapbox']['layers']=[{
+                                        "below": 'traces',
+                                        "sourcetype": "image",
+                                        "source": mk_img(ds, span, theme['cmp']),
+                                        "coordinates": coordinates
+                                    },]
+     logger.info('raster loaded')
+     return fig
 
 #### SET LOGGER #####
 logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S')
@@ -286,7 +298,9 @@ app.layout = dbc.Container([
         dcc.Store(id='theme_store', storage_type='session'),
         dcc.Store(id='planned_store', storage_type='session'),
         dcc.Store(id='fig_store', storage_type='session'),
-        ]),
+        ]
+        ),
+    html.Div(id='modal_div'),
     dbc.Card([
         dbc.CardHeader(main_header()),
         dbc.CardBody([
@@ -496,25 +510,30 @@ def populate_LED(bubble_data):
     Input('existing_farms_toggle','on'),
 )
 def store_planned_farms(toggle_planned, checklist, toggle_existing):
-    return [{'planned':toggle_planned, 'checklist':checklist, 'existing': toggle_existing}]
+    return {'planned':toggle_planned, 
+           'checklist':checklist, 
+           'existing': toggle_existing}
 
 @app.callback(
     Output('planned_checklist','options'),
+    Output('planned_checklist','value'),
     Input('init','data')
     )
 def init_checklist(init):
     logger.info('generating checklist')
     variables=json.loads(init)
-    return [l[1] for l in variables['future_farms']]
+    plans=[l[1] for l in variables['future_farms']]
+    return plans, plans
 
 
 @app.callback(
     [Output('heatmap', 'figure'),
     Output('heatmap_output', 'children'),
+    Output('modal_div', 'children')
     ],
     [
     Input('theme_store',"data"),
-    Input('planned_store', 'data'),  
+      
     Input('span-slider','value') ,
     Input('trigger','n_clicks'),
     Input('init','data'),  
@@ -522,21 +541,24 @@ def init_checklist(init):
     ],
     [  
     State('heatmap','figure'),
-    State('view_store','data')   
+    State('view_store','data'),
+    State('planned_store', 'data'),   
     ],
 )
-def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport): 
+def redraw( theme, span, trigger, init, bubble_data,  fig,  viewport, plan): 
     logger.info('drawing the map')
     ctx = dash.callback_context
     # variables=variables[0]
     #dataset=dataset[0]
     #viewdata=viewdata[0]
     #theme=theme[0]
-    plan=plan[0]
+    #plan=plan[0]
     dataset= json.loads(bubble_data)
     viewdata= json.loads(viewport)
     theme=json.loads(theme)
     variables=json.loads(init)
+    origin=[]
+    is_open=False
 
     
     fig['layout']['template']=mk_template(theme['template'])
@@ -581,6 +603,7 @@ def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport):
     ### update heatmap
     if ctx.triggered[0]['prop_id'] == 'trigger.n_clicks' or \
        ctx.triggered[0]['prop_id'] =='span-slider.value': 
+        logger.debug(f"Existing toggle is {plan['existing']}, Planned toggle is {plan['planned']}")
         if plan['existing'] or plan['planned']:
             logger.info('rasterizing the heatmap')
             r = select_zoom(viewdata['zoom'])
@@ -604,26 +627,22 @@ def redraw( theme, plan, span, trigger, init, bubble_data,  fig,  viewport):
                     for var in plan['checklist']:
                         ds[var]=planned_ds[var]*dataset['lice/egg factor']
                     logger.info('added and scaled planned farms')
+                fig=render(fig, ds,span, theme, name_list)
             else:
                 logger.info('adding only planned farms')
                 if len(plan['checklist'])>0:
                     ds=crop_ds(planned_ds[plan['checklist']]*dataset['lice/egg factor'], viewdata)
                     name_list=plan['checklist']
+                    fig=render(fig, ds, span, theme, name_list)
                 else:
-                    raise PreventUpdate
-            coordinates=get_coordinates(ds)
-            logger.debug(f'Selected farms for the map:   {name_list}')
-            logger.debug(f'coordinates:     {coordinates}')
-            fig['layout']['mapbox']['layers']=[{
-                                        "below": 'traces',
-                                        "sourcetype": "image",
-                                        "source": mk_img(ds, span, theme['cmp']),
-                                        "coordinates": coordinates
-                                    },]
-            logger.info('raster loaded')
+                    origin.append("no future")
+                    is_open=True
+                    fig['layout']['mapbox']['layers']=[]
         else:
-            raise PreventUpdate
-    return fig, None
+            origin.append("no toggle")
+            is_open=True
+            fig['layout']['mapbox']['layers']=[]
+    return fig, None, mk_modal(origin, is_open)
     
 @app.callback(
     Output('inspect-button', 'children'),
@@ -701,19 +720,6 @@ def farm_inspector(name, theme, init, curves):
         logger.debug(curves)
         return curves, mk_farm_layout(name, marks_biomass,marks_lice, variables['farm_data'][name])
 
-@app.callback(
-    Output("collapse_select_future", "is_open"),
-    Input("collapse_button_select_future",'n_clicks'),
-    Input("future_farms_toggle",'on'),
-    State("collapse_select_future", "is_open"),
-)
-def open_selected_future_farms(n, switch, is_open):
-    logger.debug('Collapsing future')
-    ctx = dash.callback_context
-    if ctx.triggered[0]['prop_id'] == 'collapse_button_select_future.n_clicks':
-        return not is_open
-    if ctx.triggered[0]['prop_id'] =="future_farms_toggle.on":
-        return True
     
 @app.callback(
     Output("collapse_select_contributor", "is_open"),
