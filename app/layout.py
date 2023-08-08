@@ -42,7 +42,7 @@ def main_header():
                      alt='logo',
                      style={'float':'right', 'padding':'5px'},
                      className='logo'),          
-            html.H1('Scottish Westcoast artificial sealice infestation'),
+            html.H1('Scottish Westcoast modelled artificial sealice infestation'),
             ThemeSwitchAIO(aio_id='theme',
                     icons={"left": "fa fa-sun", "right": "fa fa-moon"},
                     themes=[url_theme1, url_theme2])
@@ -80,7 +80,7 @@ def init_the_figure():
     fig.add_trace(go.Scatter(x=[None], y=[None],marker=go.scatter.Marker(
                         colorbar=dict( 
                             title= dict( 
-                                text="copepodid/m²/day", #r'$copepodid.m^{-2}.day^{-1}$',
+                                text="copepodid/m²", #r'$copepodid.m^{-2}.day^{-1}$',
                                 side='right'
                                 ), 
                             orientation='v', # style={'writing-mode':'vertical-rl'},
@@ -386,7 +386,7 @@ def tab1_layout():
                         target='inspect-button'),        
                     ], xs= 11, md=3),
                 dbc.Col([
-                    dcc.Markdown(r'Colormap range in $copepodid.m^{-2}.day^{-1}$',
+                    dcc.Markdown(r'Colormap range in $copepodid.m^{-2}$',
                     mathjax=True),
                     dcc.RangeSlider(
                                 id='span-slider',
