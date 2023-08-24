@@ -1,11 +1,11 @@
-xarray==2022.6.0
+xarray==2023.5.0
 rioxarray==0.13.3
 zarr==2.12.0
 numpy==1.23.4
 scipy==1.9.1
 pyproj==3.4.0
 datashader==0.14.2
-plotly==5.13.0
+plotly==5.15.0
 colorcet==3.0.0
 dash==2.8.1
 dash_bootstrap_templates==1.0.7
@@ -16,6 +16,6 @@ flask_caching==2.0.1
 dash_daq==0.5.0
 gunicorn==20.1.0
 boto3
-redis==4.4.3
+redis==4.4.2
 orjson==3.8.5
 celery==5.2.7

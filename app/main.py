@@ -329,8 +329,6 @@ app.layout = dbc.Container([
 @cache.memoize()
 def global_store(r):
     pathtods=f'curr_{r}m.zarr'
-    #if r ==50:
-    #    pathtods=f'curr_{r}m_rech.zarr'
     pathtofut=f'planned_{r}m.zarr'
     logger.info(f'using global store {pathtods}')
     super_ds=open_zarr(rootdir+pathtods).drop('North Kilbrannan')
