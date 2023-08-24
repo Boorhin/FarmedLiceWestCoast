@@ -120,10 +120,16 @@ def mk_img(ds, span, cmp):
               ]]
             }]
     arr= arr.rio.write_crs(3857, inplace=True).rio.clip(polyg, invert=True, crs=3857)
-    logger.info('data cropped')  
-    return tf.shade(arr.where(arr>0), 
-                    cmap=cmp, how='linear',
-                    span=span).to_pil()
+    logger.info('data cropped')
+    #sel1=arr.where((arr>=0.001 & arr<0.01))
+    #sel2=arr.where((arr>=0.01  & arr<0.03))
+    #sel3=arr.where((arr>=0.03  & arr>0.1 ))
+    #sel4=arr.where((arr>=0.1   & arr>0.3 ))
+    #sel5=arr.where((arr>=0.3   & arr>0.75))
+    #bins=[0.001,0.01,0.03,0.1,0.3,0.75]
+    #temp=tf.shade(arr.groupby_bins(bins).groups).to_pil()
+    temp= tf.shade(arr.where(arr>0), cmap=cmp, how='linear', span=span).to_pil()
+    return temp
 
 def select_zoom(zoom):
     '''
@@ -150,7 +156,7 @@ def query_tree():
                         return remote_data
                         
     
-def fetch_biomass(farm_data, lice_data, activated_farms, biomass_factor, lice_factor, times, ref_biom, Ids, lice_time, flag, year=2021):
+def fetch_biomass(farm_data, lice_data, activated_farms, biomass_factor, lice_factor, times, ref_biom, Ids, lice_time, flag, year=2018):
     '''
     Identify the biomass data for the month of may of the chosen year
     scale the data according to data
@@ -162,12 +168,13 @@ def fetch_biomass(farm_data, lice_data, activated_farms, biomass_factor, lice_fa
     filters=np.where(np.logical_and(times> start, times< end))[0]
     filtered=times[filters]
     for farm in farm_data.keys():       
-        extract=np.array(farm_data[farm]['biomasses'])[filters].mean()
+        extract=np.array(farm_data[farm]['biomasses'])[filters]
+        extract=np.nanmean(extract[extract!=0])
         if np.isnan(extract):
             activated_farms[farm_data[farm]['ID']]= False
         else:
-            biomass_factor[farm_data[farm]['ID']]=extract/farm_data[farm]['reference biomass']
-            ref_biom[farm_data[farm]['ID']]=farm_data[farm]['reference biomass']
+            biomass_factor[farm_data[farm]['ID']]=extract/farm_data[farm]['max biomass']
+            ref_biom[farm_data[farm]['ID']]=farm_data[farm]['max biomass']
             if flag:
                 ident=farm_data[farm]['Site ID Scot env']
                 if len(ident)>0:
@@ -211,7 +218,7 @@ logger.addHandler(dashLoggerHandler)
  # value extent
 resolution=[50,100,200,400,800]
 zooms=[9,8,7,6,5]
-start, end = "2018-05-01", "2018-05-31"
+# start, end = "2018-05-01", "2018-05-31"
 marks_biomass={
         0.1:'10%',
         0.25:'25%',
@@ -242,8 +249,8 @@ p=Proj("epsg:3857", preserve_units=False)
 
 ##################### FETCH DATA ###################
 # test local vs host
-if path.exists('/mnt/nfs/data/'):
-    rootdir='/mnt/nfs/data/'
+if path.exists('/mnt/nfs/home/data/'):
+    rootdir='/mnt/nfs/home/data/'
 else:
     rootdir='/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'
 
@@ -298,6 +305,8 @@ app.layout = dbc.Container([
         dcc.Store(id='theme_store', storage_type='session'),
         dcc.Store(id='planned_store', storage_type='session'),
         dcc.Store(id='fig_store', storage_type='session'),
+        dcc.Store(id='selection_store',storage_type='session'),
+        dcc.Store(id='tab2_store',storage_type='session'),
         ]
         ),
     html.Div(id='modal_div'),
@@ -307,7 +316,7 @@ app.layout = dbc.Container([
             dbc.Tabs(id='all_tabs',
                     children= [
                         dbc.Tab(tab1_layout(),label='Interactive map',tab_id='tab-main',),
-                        #dbc.Tab(tab2_layout(farm_data, marks_biomass,marks_lice),label='Tuning dashboard',tab_id='tab-tunning',),
+                        dbc.Tab(tab2_layout(),label='Selected area inspection', tab_id='tab-area'),
                         dbc.Tab(tab3_layout(),label='Farm data inspection',tab_id='tab-graph',),
                         dbc.Tab(tab4_layout(), label='Documentation', tab_id='tab-doc'),
                     ])
@@ -324,7 +333,8 @@ def global_store(r):
     #    pathtods=f'curr_{r}m_rech.zarr'
     pathtofut=f'planned_{r}m.zarr'
     logger.info(f'using global store {pathtods}')
-    super_ds=open_zarr(rootdir+pathtods) 
+    super_ds=open_zarr(rootdir+pathtods).drop('North Kilbrannan')
+    super_ds=super_ds.where(super_ds.x<-509945) # remove the border
     logger.debug(f'zarr chunks:   {super_ds.chunks}')
     planned_ds= open_zarr(rootdir+pathtofut)
     return super_ds, planned_ds
@@ -338,11 +348,11 @@ def initialise_var(toggle):
     logger.info('Preparing dataset')
     variables={}
     master='curr_800m.zarr'
-    super_ds=open_zarr(rootdir+master)
+    super_ds=open_zarr(rootdir+master).drop('North Kilbrannan')
     variables['All_names']=np.array(list(super_ds.keys()))
-    variables['future_farms']=read_future_farms(rootdir+'future_farms.txt')
+    variables['future_farms']=read_future_farms(rootdir+'farm_data/future_farms.txt')
     variables['ref_biom']=np.zeros(len(variables['All_names']))
-    liceStore='consolidated_sealice_data_2017-2021.zarr'
+    liceStore='farm_data/consolidated_sealice_data_2017-2021.zarr'
     lice_data=open_zarr(rootdir+liceStore)
     ### Correct typos in the raw data
     id_c=250
@@ -353,10 +363,10 @@ def initialise_var(toggle):
         lice_data=lice_data.drop(mess)
     variables['lice_data']=lice_data.to_dict()
     variables['lice time']=variables['lice_data']['coords']['time']['data']
-    csvfile='biomasses.csv'
-    variables['farm_data'], variables['times'], _ , variables['Ids'] =read_farm_data(rootdir+csvfile, lice_data)
+    csvfile='farm_data/biomasses_to_03-2023.csv'
+    variables['farm_data'], variables['times'], _ , variables['Ids'] =read_farm_data(rootdir+csvfile, lice_data, super_ds.keys())
     logger.info('Farm loaded')
-    sepacsv= 'SEPA_GSID.csv'
+    sepacsv= 'farm_data/SEPA_GSID.csv'
     variables['farm_data']=add_new_SEPA_nb(rootdir+sepacsv, variables['farm_data'])
     logger.info('Variables loaded')
     return json.dumps(variables, cls= JsonEncoder) 
@@ -418,7 +428,7 @@ def compute_lice_data(liceC, egg, meas, init):
     )
 def store_viewport(relay):
     logger.debug('Storing viewport data')
-    logger.debug(f'relay:    {relay}')
+    logger.debug(f'relay: {relay}')
     default_view=[[-16., 60.], 
             [5., 60.], 
             [5., 53.], 
@@ -438,9 +448,34 @@ def store_viewport(relay):
     corners=calculate_edge(np.array(bbox))
     corners['zoom']=zoom
     res=select_zoom(zoom)
+
     return json.dumps(corners, cls= JsonEncoder), f'Render density map at {res}m resolution'
     
-        
+@app.callback(
+    Output('selection_store','data'),
+    Input('heatmap', 'selectedData'),
+    ) 
+def store_selections(selection):
+    logger.debug('Storing selection data')
+    #logger.debug(selection)
+    polygon= [
+              {'type': 'Polygon',
+               'coordinates': []
+               }]
+    if selection is not None:
+        if 'lassoPoints' in selection.keys():
+            polygon[0]['coordinates']= [selection['lassoPoints']['mapbox']]
+            logger.debug(f'lasso: {polygon}')
+        if 'range' in selection.keys():
+            corners= selection['range']['mapbox'] 
+            #corners [[-5.830548160160845, 56.100192972898526], [-4.578531927385427, 55.50624123351233]]}}
+            polygon[0]['coordinates']= [[corners[0], 
+                      [corners[0][0], corners[1][1]],
+                      corners[1], 
+                      [corners[1][0],corners[0][1]],
+                      corners[0]]]
+            logger.debug(f'rectangle: {polygon}')        
+    return json.dumps(polygon, cls= JsonEncoder)
 
 @app.callback(
     Output('bubbles','data'),
@@ -470,10 +505,11 @@ def mk_bubbles(year, biomC,lice_tst, init, liceData, meas):
                                                      activated_farms, biomass_factor, lice_factor, 
                                                      np.array(variables['times'],dtype='datetime64[D]'), 
                                                      np.array(variables['ref_biom']), variables['Ids'], 
-                                                     np.array(variables['lice time'], dtype= "datetime64[D]"),meas, year)
+                                                     np.array(variables['lice time'], dtype= "datetime64[D]"),
+                                                     meas, year)
     name_list=np.array(list(variables['farm_data'].keys()))[idx]    
     ##### update discs farms
-    current_biomass=[variables['farm_data'][farm]['reference biomass']*
+    current_biomass=[variables['farm_data'][farm]['licensed peak biomass']*
                                     biomass_factor[variables['farm_data'][farm]['ID']] *biomC
                                     for farm in name_list]
         # set global factor biomass x individual farm biom x individual lice x egg model
@@ -548,11 +584,6 @@ def init_checklist(init):
 def redraw( theme, span, trigger, init, bubble_data,  fig,  viewport, plan): 
     logger.info('drawing the map')
     ctx = dash.callback_context
-    # variables=variables[0]
-    #dataset=dataset[0]
-    #viewdata=viewdata[0]
-    #theme=theme[0]
-    #plan=plan[0]
     dataset= json.loads(bubble_data)
     viewdata= json.loads(viewport)
     theme=json.loads(theme)
@@ -622,7 +653,7 @@ def redraw( theme, span, trigger, init, bubble_data,  fig,  viewport, plan):
                 logger.info('Scaled')    
                 if plan['planned']:
                     logger.info('adding planned farms')
-                    planned_ds=crop_ds(planned_ds, viewdata)
+                    planned_ds=crop_ds(planned_ds, viewdata)/24
                     name_list=np.hstack((name_list,plan['checklist']))
                     for var in plan['checklist']:
                         ds[var]=planned_ds[var]*dataset['lice/egg factor']
@@ -662,6 +693,17 @@ def grab_farm(select, data):
             return f'{name} has no record', True
         else:
             return f'Inspect {name} data', False 
+
+#@app.callback(
+#     Output('inspect-area', 'children'),
+#     Output('inspect-area', 'disabled'),
+#     Input('selection_store','data'),)
+#def activate_inspection(data):
+#    if data is None:
+#        raise PreventUpdate
+#    else:
+#        return 'Open the area inspection tab', True     
+
 
 @app.callback(
     Output('all_tabs', 'active_tab'),
@@ -743,5 +785,56 @@ def open_selected_future_farms(n, is_open):
         return not is_open
     return is_open
 
+
+@app.callback(
+    Output("tab2_store",'data'),
+    # Output('all_tabs', 'active_tab'),
+#    Input('inspect-area', 'n_clicks'),    
+    Input('selection_store','data'),
+    Input('view_store','data'),
+#    State('inspect-area', 'children'),
+    )
+def compute_selection_stats(selection,view):
+    selection=json.loads(selection)
+    tab2={'counts':{},
+          'max':{},
+          'mean':{},
+          'stdv':{}}
+    if len(selection[0]['coordinates'])==0:
+        raise PreventUpdate   
+    else:
+        
+        r = select_zoom(json.loads(view)['zoom'])
+        super_ds, planned_ds=global_store(r)
+        cropped_current=super_ds.rio.write_crs(3857, inplace=True).rio.clip(selection, crs=4326)
+        cropped_planned=planned_ds.rio.write_crs(3857, inplace=True).rio.clip(selection, crs=4326).compute()
+    ### statistics counts of cells with values, max concentrations, average, stdv    
+        for ds in [cropped_current, cropped_planned]:
+            for farm in ds.keys():
+                arr= ds[farm].compute()
+                if arr.count().item()>0:
+                    tab2['counts'][farm], tab2['max'][farm], tab2['mean'][farm], tab2['stdv'][farm]=arr.count().item(), arr.max().item(), arr.mean().item(), arr.std().item()
+    logger.debug('tab2 data stored')
+    return json.dumps(tab2, cls= JsonEncoder)
+
+@app.callback(
+    Output('counts','figure'),
+    Output('maxis','figure'),
+    Output('means','figure'),
+    Output('standev','figure'),## all the graphs
+    Input("tab2_store",'data'),
+    State('counts','figure'),
+    State('maxis','figure'),
+    State('means','figure'),
+    State('standev','figure')
+)    
+def draw_statistics(tab2, fig1,fig2,fig3,fig4):
+    stats=json.loads(tab2)
+    logger.debug(f'tab2_{tab2}')
+    for val,fig in zip(['counts','max','mean','stdv'],[fig1,fig2,fig3,fig4]):
+        fig['data'][0]['x']=list(stats[val].keys())
+        fig['data'][0]['y']=list(stats[val].values())
+    return fig1, fig2, fig3, fig4
+    
 if __name__ == '__main__':
     app.run_server(host='0.0.0.0', port=8050, debug=True)

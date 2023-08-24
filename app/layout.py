@@ -189,7 +189,11 @@ def make_base_figure(farm_data, center_lat, center_lon, span, cmp, template):
                     pitch=0,
                     zoom=5.5,
                     style="carto-darkmatter",
-                    ))
+                    ),
+                xaxis=dict(
+                     ticks="",
+                     )
+                )
     logger.info('figure done.')
     return fig
 
@@ -365,7 +369,7 @@ def tab1_layout():
                         [dbc.Button('',
                             id='trigger', 
                             n_clicks=0),
-                    dbc.Tooltip('''
+                        dbc.Tooltip('''
                         This updates or creates the lice density map according to the parameter you have selected. 
                         You can simulate a global change of the farm biomasses, the global lice infestation levels, 
                         use the reported lice from the best data we have and scale the color range. 
@@ -378,23 +382,33 @@ def tab1_layout():
                         dbc.Button('Select a farm on the map for inspection',
                                id='inspect-button', 
                                n_clicks=0,
-                               disabled=True),],
+                               disabled=True),
+                        #dbc.Button('Analyse the selected area',
+                        #      id='inspect-area',
+                        #      n_clicks=0,
+                        #      disabled=True
+                        #      ),
+                        ],
                         className="d-grid gap-2 col-11 mx-auto",
                         ),
-                    dbc.Tooltip('''
-                        Inspect the active farm you selected on the map''',
-                        target='inspect-button'),        
-                    ], xs= 11, md=3),
+                        dbc.Tooltip('''
+                            Inspect the active farm you selected on the map''',
+                            target='inspect-button'),        
+                        #dbc.Tooltip('''
+                        #    Inspect the selected area of the map for the contributions of farms''',
+                        #    target='inspect-area'),
+                        ], xs= 11, md=3),
+                        
                 dbc.Col([
                     dcc.Markdown(r'Colormap range in $copepodid.m^{-2}$',
                     mathjax=True),
                     dcc.RangeSlider(
                                 id='span-slider',
                                 min=0,
-                                max=10,
-                                step=0.25,
+                                max=4,
+                                step=0.05,
                                 marks={n:'%s' %n for n in range(11)},
-                                value=[0,0.75],
+                                value=[0,0.25],
                                 vertical=False,
                                 )
                     ], xs= 12,md=9),
@@ -410,7 +424,7 @@ def tab1_layout():
                                 id='year_slider',
                                 step=1,
                                 min=2004,
-                                max=2021,
+                                max=2023,
                                 marks={
                                        2005:'2005',
                                        2007:'2007',
@@ -420,8 +434,9 @@ def tab1_layout():
                                        2015:'2015',
                                        2017:'2017',
                                        2019:'2019',
-                                       2021:'2021'},
-                                value=2021,
+                                       2021:'2021',
+                                       2023:'2023'},
+                                value=2018,
                                 tooltip={"placement": "bottom"}),
                     dbc.Tooltip('''Select the year of production ''', 
                                         target= 'year_slider',
@@ -452,11 +467,42 @@ def tab1_layout():
     #])
 
 ################# tab2 ###########################3
+def init_stats(title):
+    fig=go.Figure()
+    fig.add_trace(go.Bar())
+    fig.update_layout(
+        yaxis=dict(title=title)
+        )
+    return fig
 
-
-def tab2_layout(farm_data, marks_biomass,marks_lice):
-
+def tab2_layout():
+    Nboffarm=20 #to have clear graphs
     layout= dbc.Card([
+        dbc.Row([]), #main stats
+        dbc.Row([
+            dbc.Col([
+                dcc.Graph(id='counts',
+                     figure=init_stats('Counts'),
+                     )
+                ]),
+            dbc.Col([
+                dcc.Graph(id='maxis',
+                     figure=init_stats('Maxima'),
+                     )
+                ])
+            ]),
+        dbc.Row([
+            dbc.Col([
+                dcc.Graph(id='means',
+                     figure=init_stats('Averages'),
+                     )
+                ]),
+            dbc.Col([
+                dcc.Graph(id='standev',
+                    figure=init_stats('Standard deviation'),
+                    )
+                ]),
+            ]),
     ])
     return layout
 
@@ -537,7 +583,7 @@ def mk_farm_layout(name, marks_biomass,marks_lice, data):
               	          html.P('Operator: ' + data['operator']),
                    ], md=3, xs=12),
             dbc.Col([
-                html.H3('Modelled Peak Biomass {} tons'.format(data['reference biomass'])),
+                html.H3('Modelled Peak Biomass {} tons'.format(data['licensed peak biomass'])),
                 html.H3('Average lice per fish {}'.format(np.round(data['mean lice'],2))),
             ],md=8, xs=12)
             ]

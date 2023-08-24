@@ -15,51 +15,67 @@ def add_new_SEPA_nb(sepafile, farm_data):
            try:
                farm_data[line[0]]['GSID']=line[1]
            except:
-               logger.debug(f'{line[0]} not found in farmdata')
+               logger.debug(f'new SEPA numbers not found for {line[0]} ')
     return farm_data
 
-def read_farm_data(farmfile, lice_data):
+def read_farm_data(farmfile, lice_data, ds_names):
     data={}
     logger.info('########## READING BIOMASS DATA #######')
     with open(farmfile) as f:
         head=f.readline().strip().split(',')[21:]
-        times = np.array([np.datetime64(datetime.strptime(h,'%m/%d/%Y')) for h in head])
+        times = np.array([np.datetime64(datetime.strptime(h,'%Y-%m-%d')) for h in head])
         f.readline()
         id=0
         for line in f:   
             line=line.strip().split(',')
-            data[line[0]]= {'additional location':line[1],
+            if line[0] in ds_names:
+                data[line[0]]= {'additional location':line[1],
                             'Name MS': line[2],
                             'Site ID SEPA': line[3].strip(),
                             'Site ID Scot env':str(line[4]).strip(),
-                            'lat':float(line[6]),'lon':float(line[7]),
                             'Prod year':line[9],
-                            'licensed peak biomass':line[10],
                             'operator':line[13],
                             'production cycle':line[14],
                             'production in 3 years 2021': line[18],
                             'ID':id,
                             #'odd':random() < 0.5,
                             }
-            id+=1
-            ref=0
-            biom=np.zeros(len(line[21:]))
-            for i in range(len(line[21:])):
                 try:
-                    b = float(line[21+i])
-                    biom[i]=b
-                    if b>ref:
-                        ref=b
+                    data[line[0]]['lat']=float(line[6])
+                    data[line[0]]['lon']=float(line[7])
                 except:
-                    biom[i]=np.nan
-            data[line[0]]['reference biomass']= ref            
-            data[line[0]]['biomasses']=biom
-            data[line[0]]['lice data'], data[line[0]]['mean lice']=add_lice_data(line[4], lice_data)       
-            if ref==0:
-                id -=1 
-                del data[line[0]]
-            #ref_biom[id]=ref
+                    log.debug(f'No lat lon for line[0] in csv') 
+                id+=1
+                ref=0
+                biom=np.zeros(len(line[21:]))
+                for i in range(len(line[21:])):
+                    try:
+                        b = float(line[21+i])
+                        biom[i]=b
+                        if b>ref:
+                            ref=b
+                    except:
+                        biom[i]=np.nan
+                data[line[0]]['max biomass']= ref
+                # deal with inconsistencies
+                if len(line[10])>0:
+                    data[line[0]]['licensed peak biomass']= float(line[10])
+                else:
+                    data[line[0]]['licensed peak biomass']= ref
+                    logger.info(f'Using max recorded biomass for undocumented license of {line[0]}')          
+                data[line[0]]['biomasses']=biom
+                data[line[0]]['lice data'], data[line[0]]['mean lice']=add_lice_data(line[4], lice_data)       
+                if ref==0:
+                    id -=1 
+                    del data[line[0]]
+            else:
+                logger.debug(f'{line[0]} not in dataset')
     logger.info('########## BIOMASS DATA READ ###########')
+    for farm in ds_names:
+        if farm in data.keys():
+             pass
+        else:
+             logger.info(f'{farm} from dataset not found in biomass data csv')
     Ids=np.array([data[farm]['Site ID Scot env'] for farm in data.keys()])
     tree = None #mk_kde_tree(data)
     return data, times, tree , Ids
@@ -88,7 +104,10 @@ def add_lice_data(SEPA_ID, lice_data):
     for licence in lice_data.keys():
         if licence==SEPA_ID:
             arr= lice_data[licence].values
-            av = np.nanmean(lice_data[licence].values)
+            try:
+                av = np.nanmean(lice_data[licence].values)
+            except:
+                logger.info(f'{licence} has no lice data in the lice dataset')
     return arr, av
     
 def prepare_zarr():
