@@ -206,13 +206,7 @@ def render(fig, ds, span, theme, name_list):
      logger.info('raster loaded')
      return fig
 
-#### SET LOGGER #####
-logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S')
-logger = logging.getLogger('sealice_logger')
-logger.setLevel(logging.DEBUG)
-autocl=2000 #time to close notification
-dashLoggerHandler = DashLoggerHandler()
-logger.addHandler(dashLoggerHandler)
+
 
 ############# VARIABLES ##########################33
  # value extent
@@ -254,6 +248,15 @@ if path.exists('/mnt/nfs/home/data/'):
 else:
     rootdir='/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'
 
+#### SET LOGGER #####
+logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S')
+logger = logging.getLogger('sealice_logger')
+logger.setLevel(logging.DEBUG)
+autocl=2000 #time to close notification
+dashLoggerHandler = DashLoggerHandler()
+logger.addHandler(dashLoggerHandler)
+fileHandler=logging.FileHandler(rootdir+'logs.txt')
+logger.addHandler(fileHandler)
 
     
 template_theme1 = "slate"
@@ -329,8 +332,6 @@ app.layout = dbc.Container([
 @cache.memoize()
 def global_store(r):
     pathtods=f'curr_{r}m.zarr'
-    #if r ==50:
-    #    pathtods=f'curr_{r}m_rech.zarr'
     pathtofut=f'planned_{r}m.zarr'
     logger.info(f'using global store {pathtods}')
     super_ds=open_zarr(rootdir+pathtods).drop('North Kilbrannan')
