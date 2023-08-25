@@ -206,7 +206,13 @@ def render(fig, ds, span, theme, name_list):
      logger.info('raster loaded')
      return fig
 
-
+def xr_opening(path):
+    try:
+        logger.info(f'{path} is valid')
+        return open_zarr(path)
+    except:
+        logger.error(f'could not open {path}')
+        return Dataset() #dummy
 
 ############# VARIABLES ##########################33
  # value extent
@@ -258,6 +264,7 @@ logger.addHandler(dashLoggerHandler)
 fileHandler=logging.FileHandler(rootdir+'logs.txt')
 logger.addHandler(fileHandler)
 
+logger.info(f'The working dir is {rootdir}')
     
 template_theme1 = "slate"
 template_theme2 = "sandstone"
@@ -349,12 +356,12 @@ def initialise_var(toggle):
     logger.info('Preparing dataset')
     variables={}
     master='curr_800m.zarr'
-    super_ds=open_zarr(rootdir+master).drop('North Kilbrannan')
+    super_ds=xr_opening(rootdir+master).drop('North Kilbrannan')
     variables['All_names']=np.array(list(super_ds.keys()))
     variables['future_farms']=read_future_farms(rootdir+'farm_data/future_farms.txt')
     variables['ref_biom']=np.zeros(len(variables['All_names']))
     liceStore='farm_data/consolidated_sealice_data_2017-2021.zarr'
-    lice_data=open_zarr(rootdir+liceStore)
+    lice_data=xr_opening(rootdir+liceStore)
     ### Correct typos in the raw data
     id_c=250
     typos =['Fs0860', 'Fs1018', 'Fs1024'] 
