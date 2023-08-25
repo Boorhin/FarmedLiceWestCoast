@@ -29,7 +29,7 @@ from plotly.subplots import make_subplots
 from colorcet import fire, bmy
 from datashader import transfer_functions as tf
 from datetime import datetime, timedelta
-from os import path, environ
+from os import path, environ, walk
 import dash
 from dash import dcc as dcc
 from dash.exceptions import PreventUpdate
@@ -213,6 +213,12 @@ def xr_opening(path):
     except:
         logger.error(f'could not open {path}')
         return Dataset() #dummy
+        
+def walk(directory):
+    paths={}
+    for (root,dirs,files) in os.walk(directory):
+        paths[root]=[dirs, files]
+    return paths
 
 ############# VARIABLES ##########################33
  # value extent
@@ -251,9 +257,14 @@ p=Proj("epsg:3857", preserve_units=False)
 # test local vs host
 if path.exists('/mnt/nfs/home/data/'):
     rootdir='/mnt/nfs/home/data/'
-else:
+    paths={}
+elif path.exists('/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'):
     rootdir='/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'
-
+    paths={}
+else:
+    rootdir='/home'
+    paths=walk('/')
+    
 #### SET LOGGER #####
 logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S')
 logger = logging.getLogger('sealice_logger')
@@ -329,6 +340,7 @@ app.layout = dbc.Container([
                         dbc.Tab(tab2_layout(),label='Selected area inspection', tab_id='tab-area'),
                         dbc.Tab(tab3_layout(),label='Farm data inspection',tab_id='tab-graph',),
                         dbc.Tab(tab4_layout(), label='Documentation', tab_id='tab-doc'),
+                        dbc.Tab(tab5_layout(paths), label='debugging', tab_id='tab-debug'),
                     ])
              ]),
         dbc.CardFooter([main_footer()])
@@ -837,12 +849,15 @@ def compute_selection_stats(selection,view):
     State('standev','figure')
 )    
 def draw_statistics(tab2, fig1,fig2,fig3,fig4):
-    stats=json.loads(tab2)
-    logger.debug(f'tab2_{tab2}')
-    for val,fig in zip(['counts','max','mean','stdv'],[fig1,fig2,fig3,fig4]):
-        fig['data'][0]['x']=list(stats[val].keys())
-        fig['data'][0]['y']=list(stats[val].values())
-    return fig1, fig2, fig3, fig4
+    if tab2 is None:
+        raise PreventUpdate
+    else:
+        stats=json.loads(tab2)
+        logger.debug(f'tab2_{tab2}')
+        for val,fig in zip(['counts','max','mean','stdv'],[fig1,fig2,fig3,fig4]):
+            fig['data'][0]['x']=list(stats[val].keys())
+            fig['data'][0]['y']=list(stats[val].values())
+        return fig1, fig2, fig3, fig4
     
 if __name__ == '__main__':
     app.run_server(host='0.0.0.0', port=8050, debug=True)
