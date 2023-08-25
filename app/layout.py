@@ -691,6 +691,17 @@ Once the model has been run, the number of copepodid in each particle through th
        ])
     return doc
 
+##################### TAB5 #############################3
+
+
+def tab5_layout(paths):
+    return dbc.Card([
+       #dbc.CardHeader('General concepts'),
+       dbc.CardBody([
+           dcc. Markdown(paths)
+           ])
+       ])
+
 logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S')
 logger = logging.getLogger('sealice_logger')
 logger.setLevel(logging.DEBUG)
