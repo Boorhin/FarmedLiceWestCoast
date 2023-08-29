@@ -482,24 +482,24 @@ def tab2_layout():
         dbc.Row([
             dbc.Col([
                 dcc.Graph(id='counts',
-                     figure=init_stats('Counts'),
+                     figure=init_stats('Surface affected (km²)'),
                      )
                 ]),
             dbc.Col([
                 dcc.Graph(id='maxis',
-                     figure=init_stats('Maxima'),
+                     figure=init_stats('Maxima (Cop/m²)'),
                      )
                 ])
             ]),
         dbc.Row([
             dbc.Col([
                 dcc.Graph(id='means',
-                     figure=init_stats('Averages'),
+                     figure=init_stats('Averages (Cop/m²)'),
                      )
                 ]),
             dbc.Col([
                 dcc.Graph(id='standev',
-                    figure=init_stats('Standard deviation'),
+                    figure=init_stats('Standard deviation (Cop/m²)'),
                     )
                 ]),
             ]),
@@ -695,8 +695,11 @@ Once the model has been run, the number of copepodid in each particle through th
 
 
 def tab5_layout(paths):
+    if len(paths)==0:
+           paths=''
+    else:
+           paths=str(paths)
     return dbc.Card([
-       #dbc.CardHeader('General concepts'),
        dbc.CardBody([
            dcc. Markdown(paths)
            ])

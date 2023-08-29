@@ -263,7 +263,7 @@ elif path.exists('/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/
     paths={}
 else:
     rootdir='/home'
-    paths=walk('/')
+    paths=walk('/mnt/nfs', topdown=False)
     
 #### SET LOGGER #####
 logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S')
@@ -454,6 +454,8 @@ def store_viewport(relay):
             [5., 53.], 
             [-16., 53.]]
     if relay is not None:
+        if 'dragmode' in relay.keys():
+            raise PreventUpdate
         if 'mapbox.zoom' in relay.keys():
             zoom=relay['mapbox.zoom']
         else:
@@ -485,7 +487,7 @@ def store_selections(selection):
     if selection is not None:
         if 'lassoPoints' in selection.keys():
             polygon[0]['coordinates']= [selection['lassoPoints']['mapbox']]
-            logger.debug(f'lasso: {polygon}')
+            #logger.debug(f'lasso: {polygon}')
         if 'range' in selection.keys():
             corners= selection['range']['mapbox'] 
             #corners [[-5.830548160160845, 56.100192972898526], [-4.578531927385427, 55.50624123351233]]}}
@@ -494,7 +496,7 @@ def store_selections(selection):
                       corners[1], 
                       [corners[1][0],corners[0][1]],
                       corners[0]]]
-            logger.debug(f'rectangle: {polygon}')        
+            #logger.debug(f'rectangle: {polygon}')        
     return json.dumps(polygon, cls= JsonEncoder)
 
 @app.callback(
@@ -825,9 +827,19 @@ def compute_selection_stats(selection,view):
     else:
         
         r = select_zoom(json.loads(view)['zoom'])
+        tab2['resolution']=r
         super_ds, planned_ds=global_store(r)
         cropped_current=super_ds.rio.write_crs(3857, inplace=True).rio.clip(selection, crs=4326)
-        cropped_planned=planned_ds.rio.write_crs(3857, inplace=True).rio.clip(selection, crs=4326).compute()
+        cropped_planned=planned_ds.rio.write_crs(3857, inplace=True).rio.clip(selection, crs=4326)
+        stack_current=cropped_current.to_stacked_array('v', ['y', 'x']).sum(dim='v').compute()
+        stack_planned=cropped_planned.to_stacked_array('v', ['y', 'x']).sum(dim='v').compute()      
+        for arr,name in zip([stack_current, stack_planned], ['Active farms', 'Planned farms']):
+            tab2['counts'][name], tab2['max'][name], tab2['mean'][name], tab2['stdv'][name]=arr.count().item(), arr.max().item(), arr.mean().item(), arr.std().item()
+        tab2['max']['All'], tab2['mean']['All'], tab2['stdv']['All']= max([tab2['max']['Active farms'], \
+                            tab2['max']['Planned farms']]), \
+                            sum([tab2['mean']['Active farms'], tab2['mean']['Planned farms']])/2, \
+                            sum([tab2['stdv']['Active farms'], tab2['stdv']['Planned farms']])/2
+        logger.debug(tab2)
     ### statistics counts of cells with values, max concentrations, average, stdv    
         for ds in [cropped_current, cropped_planned]:
             for farm in ds.keys():
@@ -852,11 +864,14 @@ def draw_statistics(tab2, fig1,fig2,fig3,fig4):
     if tab2 is None:
         raise PreventUpdate
     else:
+        logger.info('Drawing area statistics')
         stats=json.loads(tab2)
-        logger.debug(f'tab2_{tab2}')
+        # logger.debug(f'tab2_{tab2}')
         for val,fig in zip(['counts','max','mean','stdv'],[fig1,fig2,fig3,fig4]):
             fig['data'][0]['x']=list(stats[val].keys())
             fig['data'][0]['y']=list(stats[val].values())
+        #logger.debug(fig['data'][0]['x'])
+        fig1['data'][0]['y']=[float(x)*stats['resolution']**2/1000000 for x in fig1['data'][0]['y']]
         return fig1, fig2, fig3, fig4
     
 if __name__ == '__main__':
