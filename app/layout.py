@@ -73,7 +73,7 @@ def main_footer():
 
 def init_the_figure():
     logger.info('Making figure ...')
-    span=[0,0.75]
+    span=[0,0.25]
     center_lat, center_lon=57.1, -6.4
     # variables=json.loads(init)
     fig= go.Figure()
@@ -230,6 +230,15 @@ def tuning_card():
                                         Stien et al. 2005, based on model matching of real data suggest 30 eggs /hour.''', 
                                         target= 'egg_toggle',
                                         placement='bottom'),          
+                    daq.BooleanSwitch(
+                                        id='biom_toggle',
+                                        on=True,
+                                        label='Use reported biomass',
+                                        ),
+                    dbc.Tooltip('''This toggle allows to switch from the reported biomass in farm
+                                to their maximum biomass allowed as per the Scottish Aquaculture website.''', 
+                                        target= 'biom_toggle',
+                                        placement='bottom'),                    
                     ]),     
                 dbc.Col([
                     daq.Knob(

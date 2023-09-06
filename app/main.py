@@ -14,7 +14,7 @@
 
 
 # import gcsfs
-from  xarray import open_zarr
+from  xarray import open_zarr, DataArray
 #from rasterio.enums import Resampling
 import rioxarray
 import json, logging, orjson
@@ -121,13 +121,6 @@ def mk_img(ds, span, cmp):
             }]
     arr= arr.rio.write_crs(3857, inplace=True).rio.clip(polyg, invert=True, crs=3857)
     logger.info('data cropped')
-    #sel1=arr.where((arr>=0.001 & arr<0.01))
-    #sel2=arr.where((arr>=0.01  & arr<0.03))
-    #sel3=arr.where((arr>=0.03  & arr>0.1 ))
-    #sel4=arr.where((arr>=0.1   & arr>0.3 ))
-    #sel5=arr.where((arr>=0.3   & arr>0.75))
-    #bins=[0.001,0.01,0.03,0.1,0.3,0.75]
-    #temp=tf.shade(arr.groupby_bins(bins).groups).to_pil()
     temp= tf.shade(arr.where(arr>0), cmap=cmp, how='linear', span=span).to_pil()
     return temp
 
@@ -353,7 +346,7 @@ def global_store(r):
     pathtods=f'curr_{r}m.zarr'
     pathtofut=f'planned_{r}m.zarr'
     logger.info(f'using global store {pathtods}')
-    super_ds=open_zarr(rootdir+pathtods).drop('North Kilbrannan')
+    super_ds=open_zarr(rootdir+pathtods)#.drop('North Kilbrannan')
     super_ds=super_ds.where(super_ds.x<-509945) # remove the border
     logger.debug(f'zarr chunks:   {super_ds.chunks}')
     planned_ds= open_zarr(rootdir+pathtofut)
@@ -368,7 +361,7 @@ def initialise_var(toggle):
     logger.info('Preparing dataset')
     variables={}
     master='curr_800m.zarr'
-    super_ds=xr_opening(rootdir+master).drop('North Kilbrannan')
+    super_ds=xr_opening(rootdir+master)#.drop('North Kilbrannan')
     variables['All_names']=np.array(list(super_ds.keys()))
     variables['future_farms']=read_future_farms(rootdir+'farm_data/future_farms.txt')
     variables['ref_biom']=np.zeros(len(variables['All_names']))
@@ -430,13 +423,16 @@ def compute_lice_data(liceC, egg, meas, init):
         c_lice=30/16.9
     else:
         c_lice=1
-    lice_factor=np.ones(len(variables['All_names']))/2
+    lice_factor=np.ones(len(variables['All_names']))
     if not meas:
         liceC *=2
         if liceC==0:
             liceC=0.00001
         lice_factor*=liceC
+    logger.debug(f'c_lice: {c_lice}')
     lice_factor *= c_lice
+    logger.debug(f'lice_factor: {lice_factor[0]}')
+    logger.debug(f'liceC: {liceC}')
     return [{'lice factor': lice_factor, 
                        'lice knob': liceC, 
                        'egg factor': c_lice}]
@@ -506,22 +502,24 @@ def store_selections(selection):
     Input('biomass_knob','value'),
     Input('lice_store','modified_timestamp'), 
     Input('init', 'data'), 
-    Input('lice_store','data'),  
+    Input('lice_store','data'),
+    Input('biom_toggle', 'on'),  
     ],
     [   
     State('lice_meas_toggle','on')
     ],
 )
-def mk_bubbles(year, biomC,lice_tst, init, liceData, meas):
+def mk_bubbles(year, biomC,lice_tst, init, liceData, biom_tog, meas):
     liceData=liceData[0]
     variables=json.loads(init)
     activated_farms= np.ones(len(variables['All_names']), dtype='bool')
     Coeff=np.ones(len(variables['All_names'])) 
-    biomass_factor=np.ones(len(variables['All_names']))
+    biomass_factor=np.zeros(len(variables['All_names']))
     lice_factor=np.array(liceData['lice factor'])
     if biomC ==0:
         biomC=0.00001
     biomC /=100
+    logger.debug(f'biomC: {biomC}')
     logger.info('preparing lice factor')
     idx, biomass_factor, lice_factor, ref_biom=fetch_biomass(variables['farm_data'], variables['lice_data'], 
                                                      activated_farms, biomass_factor, lice_factor, 
@@ -529,17 +527,19 @@ def mk_bubbles(year, biomC,lice_tst, init, liceData, meas):
                                                      np.array(variables['ref_biom']), variables['Ids'], 
                                                      np.array(variables['lice time'], dtype= "datetime64[D]"),
                                                      meas, year)
-    name_list=np.array(list(variables['farm_data'].keys()))[idx]    
+    name_list=np.array(list(variables['farm_data'].keys()))[idx]
+    if not biom_tog:
+        biomass_factor=np.ones(len(variables['All_names']))
     ##### update discs farms
     current_biomass=[variables['farm_data'][farm]['licensed peak biomass']*
                                     biomass_factor[variables['farm_data'][farm]['ID']] *biomC
                                     for farm in name_list]
         # set global factor biomass x individual farm biom x individual lice x egg model
     logger.debug(f'idx:      {type(idx)}')
-    logger.debug(f'biomass factor:      {type(biomass_factor)}')
-    logger.debug(f'lice factors:      {type(lice_factor)}')
+    logger.debug(f'biomass factor:      {biomass_factor}')
+    logger.debug(f'lice factors:      {lice_factor}')
     Coeff=biomC*biomass_factor[idx]*lice_factor[idx]
-    alllice=(Coeff*ref_biom[idx]).sum()*4.5*1000
+    alllice=(Coeff*ref_biom[idx]).sum()*1000*0.5*16.7/4.5 #running in circles... running parameters
     return json.dumps({ 
          'coeff': Coeff,
          'all lice': alllice,
@@ -559,7 +559,7 @@ def mk_bubbles(year, biomC,lice_tst, init, liceData, meas):
 def populate_LED(bubble_data):
     logger.info('modifying LED values')
     dataset= json.loads(bubble_data)
-    return int(sum(dataset['coeff'])*1000), int(dataset['all lice']/24)
+    return int(sum(dataset['coeff'])*1000), int(dataset['all lice'])
     
 @app.callback(
     Output('planned_store','data'),
@@ -675,8 +675,9 @@ def redraw( theme, span, trigger, init, bubble_data,  fig,  viewport, plan):
                 logger.info('Scaled')    
                 if plan['planned']:
                     logger.info('adding planned farms')
-                    planned_ds=crop_ds(planned_ds, viewdata)/24
+                    planned_ds=crop_ds(planned_ds, viewdata)
                     name_list=np.hstack((name_list,plan['checklist']))
+                    logger.debug(f"scaling planned with {dataset['lice/egg factor']}")
                     for var in plan['checklist']:
                         ds[var]=planned_ds[var]*dataset['lice/egg factor']
                     logger.info('added and scaled planned farms')
@@ -814,10 +815,13 @@ def open_selected_future_farms(n, is_open):
 #    Input('inspect-area', 'n_clicks'),    
     Input('selection_store','data'),
     Input('view_store','data'),
+    Input('bubbles','data'),
+    State('planned_store', 'data')
 #    State('inspect-area', 'children'),
     )
-def compute_selection_stats(selection,view):
+def compute_selection_stats(selection,view, bubble_data, plan):
     selection=json.loads(selection)
+    dataset=json.loads(bubble_data) 
     tab2={'counts':{},
           'max':{},
           'mean':{},
@@ -829,10 +833,16 @@ def compute_selection_stats(selection,view):
         r = select_zoom(json.loads(view)['zoom'])
         tab2['resolution']=r
         super_ds, planned_ds=global_store(r)
-        cropped_current=super_ds.rio.write_crs(3857, inplace=True).rio.clip(selection, crs=4326)
-        cropped_planned=planned_ds.rio.write_crs(3857, inplace=True).rio.clip(selection, crs=4326)
+        name_list=dataset['name list']
+        for i in range(len(name_list)):                    
+            super_ds[name_list[i]].values *=dataset['coeff'][i]
+        cropped_current=super_ds.rio.write_crs(3857, inplace=True).rio.clip(selection, crs=4326)[name_list]
         stack_current=cropped_current.to_stacked_array('v', ['y', 'x']).sum(dim='v').compute()
-        stack_planned=cropped_planned.to_stacked_array('v', ['y', 'x']).sum(dim='v').compute()      
+        if len(plan['checklist'])>0:
+            cropped_planned=planned_ds.rio.write_crs(3857, inplace=True).rio.clip(selection, crs=4326)[plan['checklist']]
+            stack_planned=cropped_planned.to_stacked_array('v', ['y', 'x']).sum(dim='v').compute()*dataset['lice/egg factor']
+        else:
+            stack_planned=DataArray()
         for arr,name in zip([stack_current, stack_planned], ['Active farms', 'Planned farms']):
             tab2['counts'][name], tab2['max'][name], tab2['mean'][name], tab2['stdv'][name]=arr.count().item(), arr.max().item(), arr.mean().item(), arr.std().item()
         tab2['max']['All'], tab2['mean']['All'], tab2['stdv']['All']= max([tab2['max']['Active farms'], \
@@ -843,9 +853,13 @@ def compute_selection_stats(selection,view):
     ### statistics counts of cells with values, max concentrations, average, stdv    
         for ds in [cropped_current, cropped_planned]:
             for farm in ds.keys():
+                if farm in plan['checklist']:
+                    den=dataset['lice/egg factor']
+                else:
+                    den=1
                 arr= ds[farm].compute()
                 if arr.count().item()>0:
-                    tab2['counts'][farm], tab2['max'][farm], tab2['mean'][farm], tab2['stdv'][farm]=arr.count().item(), arr.max().item(), arr.mean().item(), arr.std().item()
+                    tab2['counts'][farm], tab2['max'][farm], tab2['mean'][farm], tab2['stdv'][farm]=arr.count().item(), arr.max().item()*den, arr.mean().item()*den, arr.std().item()*den
     logger.debug('tab2 data stored')
     return json.dumps(tab2, cls= JsonEncoder)
 
