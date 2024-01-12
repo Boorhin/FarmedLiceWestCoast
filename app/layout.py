@@ -2,7 +2,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import dash
 from dash import dcc as dcc
-import dash_mantine_components as dmc
+
 import dash_bootstrap_components as dbc
 from dash_extensions.enrich import Output, Input, html, State, MATCH, ALL, DashProxy, LogTransform, DashLogger
 import dash_daq as daq
@@ -42,7 +42,7 @@ def main_header():
                      alt='logo',
                      style={'float':'right', 'padding':'5px'},
                      className='logo'),          
-            html.H1('Scottish Westcoast modelled artificial sealice infestation'),
+            html.H1('Scottish Westcoast modelled fish farm sealice distribution'),
             ThemeSwitchAIO(aio_id='theme',
                     icons={"left": "fa fa-sun", "right": "fa fa-moon"},
                     themes=[url_theme1, url_theme2])
@@ -71,11 +71,22 @@ def main_footer():
  
 #####################TAB 1 ###########################
 
+def define_ticks(span):
+    values=np.linspace(span[0], span[1],5)
+    text= values.astype("U10")
+    text[-1]="≥"+text[-1]
+    text[0]="≤"+text[0]
+    return values, text
+
+    
+
 def init_the_figure():
     logger.info('Making figure ...')
     span=[0,0.25]
     center_lat, center_lon=57.1, -6.4
+    year=2018
     # variables=json.loads(init)
+    values, text= define_ticks(span)
     fig= go.Figure()
     fig.add_trace(go.Scatter(x=[None], y=[None],marker=go.scatter.Marker(
                         colorbar=dict( 
@@ -84,6 +95,8 @@ def init_the_figure():
                                 side='right'
                                 ), 
                             orientation='v', # style={'writing-mode':'vertical-rl'},
+                            tickvals=values,
+                            ticktext=text,
                             ),
                         cmax=span[1],
                         cmin=span[0],
@@ -98,7 +111,7 @@ def init_the_figure():
                                     sizeref=10,
                                     showscale=False,
                                     ),
-                                name=f"Processed with biomass of may {2021}"))
+                                name=f"Processed with biomass of May {year}"))
     fig.add_trace(go.Scattermapbox(
                                 lat=[None],
                                 lon=[None],
@@ -110,7 +123,7 @@ def init_the_figure():
                                 lon=[None],
                                 text=[None],
                                 hovertemplate="<b>%{text}</b><br><br>" + \
-                                        "Biomass: %{marker.size:.0f} tons<br>",
+                                        "Biomass: %{marker.size:.0f} tonnes<br>",
                                 marker=dict(color='#00ccff',
                                     #size=[None],
                                     sizemode='area',
@@ -136,14 +149,18 @@ def init_the_figure():
                     style="carto-darkmatter",
                     )
                     )
+    
     logger.info('figure done.')
     return fig
     
 def make_base_figure(farm_data, center_lat, center_lon, span, cmp, template):
     logger.info('Making figure ...')
+    values, text= define_ticks(span)
     fig= go.Figure()
     fig.add_trace(go.Scatter(x=[None], y=[None],marker=go.scatter.Marker(
                         colorscale=cmp,
+                        colorbar=dict(tickvals=values,
+                            ticktext=text,),
                         cmax=span[1],
                         cmin=span[0],
                         showscale=True,
@@ -164,7 +181,7 @@ def make_base_figure(farm_data, center_lat, center_lon, span, cmp, template):
                                 lon=future_farms['Lon'],
                                 text=future_farms['Name'],
                                 hovertemplate="<b>%{text}</b><br><br>" + \
-                                        "Biomass: %{marker.size:.0f} tons<br>",
+                                        "Biomass: %{marker.size:.0f} tonnes<br>",
                                 marker=dict(color='#00ccff',
                                     size=future_farms['Biomass_tonnes'],
                                     sizemode='area',
@@ -224,10 +241,9 @@ def tuning_card():
                                         id='egg_toggle_output',
                                         style={'text-align':'center'}
                                         ),
-                    dbc.Tooltip('''Choose an egg hatching model suits best. 
-                                        Rittenhouse et al. based on experimental data, 
-                                        produced an equation that suggested 16 eggs released per hour per adult copepodid. 
-                                        Stien et al. 2005, based on model matching of real data suggest 30 eggs /hour.''', 
+                    dbc.Tooltip('''Choose the nauplii production model. 
+                        Most modellers, including Marine Scotland, use Stein et al. 2005, where each adult female louse produces 30 nauplii/hour. 
+                        Rittenhousen et al. suggest a value of 16.9 nauplii/hour.''', 
                                         target= 'egg_toggle',
                                         placement='bottom'),          
                     daq.BooleanSwitch(
@@ -235,8 +251,9 @@ def tuning_card():
                                         on=True,
                                         label='Use reported biomass',
                                         ),
-                    dbc.Tooltip('''This toggle allows to switch from the reported biomass in farm
-                                to their maximum biomass allowed as per the Scottish Aquaculture website.''', 
+                    dbc.Tooltip('''This toggle allows you to switch between using the reported biomass in all farms, 
+                               in May of your chosen year, and using the maximum biomass licensed by SEPA 
+                               for each farm, as per the Scotland’s Aquaculture website.''', 
                                         target= 'biom_toggle',
                                         placement='bottom'),                    
                     ]),     
@@ -251,18 +268,21 @@ def tuning_card():
                         color='#f89406'
                         ),
                     dbc.Tooltip(''' 
-                        Decrease or increase the infestation rates for all the farms. 
-                        The good practice is to maintain at 0.5 louse/fish. 
-                        Infestations of 8 have been reported (cf. farm inspection tab)''',target='lice_knob'),
+                        Decrease or increase the infestation rate for all farms. 
+                        The industry’s voluntary Code of Good Practice level, in spring, is
+                        0.5 adult female lice/farmed fish. Infestations >8 have been reported 
+                        (cf. Farm inspection tab)''',target='lice_knob'),
                     daq.BooleanSwitch(
                          id='lice_meas_toggle',
                          label='Use and extrapolate reported lice',
                          on=False
                          ),
-                    dbc.Tooltip('''Very little data are available on lice infestation. 
-                    This algorithm will first try to find if there are data in the May season you selected. 
-                    If there isn't it will try to make an average of recorded lice for the farm. 
-                    If the farm never reported lice counts then it will use the nearest farm that has data.''',
+                    dbc.Tooltip('''This toggle allows you to switch between using the reported lice counts in all farms, 
+                    in May of your chosen year, and using the lice counts reported by farmers to SEPA. 
+                    Limited data are available on lice levels at individual farms. 
+                    The algorithm will first try to find data from the Scotland’s Aquaculture website, 
+                    for May in the year you have chosen. This goes back to 2017 and contains some gaps. 
+                    In the absence of data for the May month of your year, a value of 0.5 (code of good practice) is used.''',
                     target='lice_meas_toggle'
                     )
                     ]),
@@ -379,13 +399,14 @@ def tab1_layout():
                             id='trigger', 
                             n_clicks=0),
                         dbc.Tooltip('''
-                        This updates or creates the lice density map according to the parameter you have selected. 
-                        You can simulate a global change of the farm biomasses, the global lice infestation levels, 
-                        use the reported lice from the best data we have and scale the color range. 
-                        The map you produce will depend of the area visible in the map and the level of zoom. 
-                        The resolution available are 800-400-200-100-50 and will change automatically according 
-                        to the zoom in the viewport. If you change a parameter, you will have to press this button 
-                        to see the change. Be patient as this involves very heavy computations and can take a while to refresh. 
+                        This creates or updates the lice density map, according to the parameters you have selected. 
+                        By using the controls on this page to adjust the biomass of farmed fish and the number of lice on them, 
+                        you can explore the consequences for the distribution and density of sea lice outside the farms. 
+                        The lice density map will only cover the area visible in the Viewport. 
+                        The map adjusts automatically between 800m, 400m, 200m, 100m and 50m resolution, 
+                        depending how much you zoom in. When you change any parameter or reframe the Viewport, 
+                        you will have to press this button again to see the changes in the map. Be patient
+                         as this involves very heavy computation and can take a while to refresh. 
                         ''',
                         target = 'trigger'),
                         dbc.Button('Select a farm on the map for inspection',
@@ -409,7 +430,7 @@ def tab1_layout():
                         ], xs= 11, md=3),
                         
                 dbc.Col([
-                    dcc.Markdown(r'Colormap range in $copepodid.m^{-2}$',
+                    dcc.Markdown(r'Lice density range in $copepodid.m^{-2}$',
                     mathjax=True),
                     dcc.RangeSlider(
                                 id='span-slider',
@@ -419,7 +440,12 @@ def tab1_layout():
                                 marks={n:'%s' %n for n in range(11)},
                                 value=[0,0.25],
                                 vertical=False,
-                                )
+                                ),
+                    dbc.Tooltip('''Use the slider to change the minimum and the maximum 
+                        lice densities of the colour scale for the lice map. 
+                        This will allow you to see more detail in the higher lice density areas
+                        ''',
+                        target='span-slider'),
                     ], xs= 12,md=9),
                 ], align='center'),
             ])
@@ -455,7 +481,7 @@ def tab1_layout():
                     dbc.Col([
                         daq.LEDDisplay(
                             id='LED_biomass',
-                            label='Total fish farmed in may (tons)',
+                            label='Total fish farmed in May (tonnes)',
                             color='#f89406',
                             backgroundColor='#7a8288',
                             ),
@@ -463,7 +489,7 @@ def tab1_layout():
                     dbc.Col([
                         daq.LEDDisplay(
                             id='LED_egg',
-                            label='Hourly release of sealice nauplii from fish farms',
+                            label='Hourly release of sealice from fish farms',
                             color='#f89406',
                             backgroundColor='#7a8288',
                             ), 
@@ -486,6 +512,8 @@ def init_stats(title):
 
 def tab2_layout():
     Nboffarm=20 #to have clear graphs
+    columns=[{"name": c, "id": c} for  c in ['name','counts', 'max', 'mean', 'stdv']]
+    columns[1]['name']='cells'
     layout= dbc.Card([
         dbc.Row([]), #main stats
         dbc.Row([
@@ -512,6 +540,13 @@ def tab2_layout():
                     )
                 ]),
             ]),
+        dbc.Row([
+            dash.dash_table.DataTable(
+                id='datatable',
+                data=[],
+                columns= columns           
+            )
+        ])
     ])
     return layout
 
@@ -552,10 +587,10 @@ def init_farm_plot():
                                line=dict(color='firebrick', dash='dash'),
                                name='Average lice infestation'),
                                secondary_y= True)
-    for y in range(2003,2022):
+    for y in range(2002,2024):
         fig_p.add_vrect(x0=datetime(year=y, month=5, day=1),x1=datetime(year=y, month=6, day=1),line=dict(width=0), fillcolor="green", opacity=0.7)
         #fig_p.add_vline(x=datetime(year=y, month=5, day=1), line=dict(color='green', dash='dash'))
-    fig_p.update_yaxes(title='Recorded fish farmbiomass (tons)',
+    fig_p.update_yaxes(title='Recorded fish farmbiomass (tonnes)',
                     showgrid=False, secondary_y=False)
     fig_p.update_yaxes(title='Reported average lice/fish',
                     showgrid=False, secondary_y=True)                
@@ -563,9 +598,6 @@ def init_farm_plot():
         legend=dict(orientation='h'),
         )
     
-        #margin=dict(b=15, l=15, r=5, t=5),
-        #template=mk_template(template)
-    #    )
     return fig_p
                     
 
@@ -592,8 +624,9 @@ def mk_farm_layout(name, marks_biomass,marks_lice, data):
               	          html.P('Operator: ' + data['operator']),
                    ], md=3, xs=12),
             dbc.Col([
-                html.H3('Modelled Peak Biomass {} tons'.format(data['licensed peak biomass'])),
+                html.H3('Modelled Peak Biomass {} tonnes'.format(data['licensed peak biomass'])),
                 html.H3('Average lice per fish {}'.format(np.round(data['mean lice'],2))),
+                html.P('NaN means that we have no data available.')
             ],md=8, xs=12)
             ]
     return farm_lay
@@ -679,7 +712,7 @@ Once the model has been run, the number of copepodid in each particle through th
   * You can visualise the planned fish farms, their location and their relative biomass compared to the existing farms. They are represented in blue. You cannot inspect them.
   * You can visualise the global biomass farmed during the year you select as well as the number of sealice produced each day by the aquaculture industry in May that year.
   * You can visualise the effects of globally increasing the fish farm biomass. The Scottish government has announced they wanted to double it. You can put it to 200%. You can also look at what biomass would reduce significantly the risk at the scale of the West coast by reducing the % of biomass.
-  * You can tune the infestation rates (lice per fish). The good practice standards are of 0.5 lice per farmed fish. It you look at the reported infestation rates, you will see that it could be much higher during outbreaks. You can actually toggle the switch **Use and Extrapolate reported lice** that will try to find reported lice numbers for the may of the year you select. If it fails, it will take the average lice infestation for that farm and if the farm has never reported, it will take 0.5 as a default value.
+  * You can tune the infestation rates (lice per fish). The good practice standards are of 0.5 lice per farmed fish. It you look at the reported infestation rates, you will see that it could be much higher during outbreaks. You can actually toggle the switch **Use and Extrapolate reported lice** that will try to find reported lice numbers for the May of the year you select. If it fails, it will take the average lice infestation for that farm and if the farm has never reported, it will take 0.5 as a default value.
   * You can change the egg production model, meaning the number of nauplii produced per hour by each louse. Most modellers use the work of Stien et al. (2005) but Rittenhouse et al. (2016) is an alternative one you can test too.
   * You can add the contribution to the density maps of planned farms based on their declared max biomass and a standard lice density of 0.5 (except if you modify the global infestation levels).
   * You can change the resolution of the map you display. The map resolution varies as a function of the viewport from 800m to 50m. To limit the resource used, only the area visible in the map viewport is rendered. To visualise another area, you will have to press the **Render density map** again. When you browse the map, notifications will indicate the resolution you would have if you compute the map.

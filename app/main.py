@@ -248,15 +248,15 @@ p=Proj("epsg:3857", preserve_units=False)
 
 ##################### FETCH DATA ###################
 # test local vs host
-if path.exists('/mnt/nfs/home/data/'):
-    rootdir='/mnt/nfs/home/data/'
+if path.exists('/home/appUser'):
+    rootdir='/home/appUser/data/'
     paths={}
 elif path.exists('/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'):
     rootdir='/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'
     paths={}
 else:
     rootdir='/home'
-    paths=walk('/mnt/nfs', topdown=False)
+    paths=walk('/mnt/nfs')
     
 #### SET LOGGER #####
 logging.basicConfig(format='%(levelname)s:%(asctime)s__%(message)s', datefmt='%m/%d/%Y %I:%M:%S')
@@ -265,8 +265,8 @@ logger.setLevel(logging.DEBUG)
 autocl=2000 #time to close notification
 dashLoggerHandler = DashLoggerHandler()
 logger.addHandler(dashLoggerHandler)
-fileHandler=logging.FileHandler(rootdir+'logs.txt')
-logger.addHandler(fileHandler)
+#fileHandler=logging.FileHandler(rootdir+'logs.txt')
+#logger.addHandler(fileHandler)
 
 logger.info(f'The working dir is {rootdir}')
     
@@ -282,6 +282,8 @@ carto_style2="carto-positron"
 dbc_css = (
     "https://cdn.jsdelivr.net/gh/AnnMarieW/dash-bootstrap-templates@V1.0.1/dbc.min.css"
 )
+
+
 
 # Cache config
 cacheconfig={'CACHE_TYPE': 'RedisCache',
@@ -305,6 +307,14 @@ timeout = 300
 @server.route('/_ah/warmup')
 def warmup():
     """Warm up an instance of the app."""
+    #test redis connection
+    from redis import Redis
+    r = Redis(environ['REDIS_URL'], socket_connect_timeout=1)
+    try:
+        r.ping() 
+        print('connected to redis "{}"'.format(environ['REDIS_URL'])) 
+    except:
+        print(f"connection failed to {environ['REDIS_URL']}")
     return "it is warm"
     # Handle your warmup logic here, e.g. set up a database connection pool
 
@@ -557,6 +567,8 @@ def mk_bubbles(year, biomC,lice_tst, init, liceData, biom_tog, meas):
     Input('bubbles','data'),
 )
 def populate_LED(bubble_data):
+    if bubble_data is None:
+        raise PreventUpdate
     logger.info('modifying LED values')
     dataset= json.loads(bubble_data)
     return int(sum(dataset['coeff'])*1000), int(dataset['all lice'])
@@ -622,10 +634,21 @@ def redraw( theme, span, trigger, init, bubble_data,  fig,  viewport, plan):
     fig['data'][2]['lat']=[variables['farm_data'][farm]['lat'] for farm in variables['farm_data'].keys()]
     fig['data'][2]['lon']=[variables['farm_data'][farm]['lon'] for farm in variables['farm_data'].keys()]
     fig['data'][2]['text']=[farm for farm in variables['farm_data'].keys()]
-    fig['data'][3]['lat']=[l[3] for l in variables['future_farms']]
-    fig['data'][3]['lon']=[l[-1] for l in variables['future_farms']]
-    fig['data'][3]['text']=[l[1] for l in variables['future_farms']]
-    fig['data'][3]['marker']['size']=[l[2] for l in variables['future_farms']]
+    fig['data'][3]= go.Scattermapbox(
+         lat=[l[3] for l in variables['future_farms']],
+         lon=[l[-1] for l in variables['future_farms']],
+         text=[l[1] for l in variables['future_farms']],
+         hovertemplate="<b>%{text}</b><br><br>" + \
+                       "Biomass: %{marker.size:.0f} tonnes<br>",
+         marker=dict(
+             color='#00ccff',
+             size=[l[2] for l in variables['future_farms']],
+             sizemode='area',
+             sizeref=10,
+             showscale=False,
+             ),
+        name='Planned farms',             
+         )
     
     ### draw bubbles 
     fig['data'][1]=go.Scattermapbox(
@@ -633,7 +656,7 @@ def redraw( theme, span, trigger, init, bubble_data,  fig,  viewport, plan):
                                 lon=[variables['farm_data'][farm]['lon'] for farm in dataset['name list']],
                                 text=dataset['name list'],
                                 hovertemplate="<b>%{text}</b><br><br>" + \
-                                        "Biomass: %{marker.size:.0f} tons<br>",
+                                        "Biomass: %{marker.size:.0f} tonnes<br>",
                                 marker=dict(color='#62c462',
                                     size=dataset['current biomass'],
                                     sizemode='area',
@@ -641,17 +664,7 @@ def redraw( theme, span, trigger, init, bubble_data,  fig,  viewport, plan):
                                     showscale=False,
                                     ),
                                 name=f"Processed with biomass of may {dataset['year']}")
-    fig['data'][1]['lat']=[variables['farm_data'][farm]['lat'] for farm in dataset['name list']]
-    fig['data'][1]['lon']=[variables['farm_data'][farm]['lon'] for farm in dataset['name list']]
-    fig['data'][1]['text']=dataset['name list']
-    fig['data'][1]['hovertemplate']="<b>%{text}</b><br><br>" + "Biomass: %{marker.size:.0f} tons<br>"
-    fig['data'][1]['marker']=dict(color='#62c462',
-                                    size=dataset['current biomass'],
-                                    sizemode='area',
-                                    sizeref=10,
-                                    showscale=False,
-                                    )
-    fig['data'][1]['name']=f"Processed with biomass of may {dataset['year']}"                        
+                        
     
     ### update heatmap
     if ctx.triggered[0]['prop_id'] == 'trigger.n_clicks' or \
@@ -717,17 +730,6 @@ def grab_farm(select, data):
         else:
             return f'Inspect {name} data', False 
 
-#@app.callback(
-#     Output('inspect-area', 'children'),
-#     Output('inspect-area', 'disabled'),
-#     Input('selection_store','data'),)
-#def activate_inspection(data):
-#    if data is None:
-#        raise PreventUpdate
-#    else:
-#        return 'Open the area inspection tab', True     
-
-
 @app.callback(
     Output('all_tabs', 'active_tab'),
     Output('dropdown_farms', 'value'),
@@ -765,7 +767,7 @@ def farm_inspector(name, theme, init, curves):
     variables=json.loads(init)
     template = theme['template']    
     logger.debug(f'curve name: {name}')  
-    time_range=   np.array([variables['times'][0],variables['lice_data']['coords']['time']['data'][-1]], dtype='datetime64[D]')#convert_dates()
+    time_range=   np.array([variables['times'][0],variables['times'][-1]], dtype='datetime64[D]')#convert_dates()
     if not name:
         raise PreventUpdate
     else:
@@ -791,7 +793,7 @@ def farm_inspector(name, theme, init, curves):
     Input("collapse_button_select_contributor",'n_clicks'),
     State("collapse_select_contributor", "is_open"),
 )
-def open_selected_future_farms(n, is_open):
+def open_contributor_collapse(n, is_open):
     logger.debug('Collapsing contributor')
     if n:
         return not is_open
@@ -802,7 +804,7 @@ def open_selected_future_farms(n, is_open):
     Input("collapse_button_tune",'n_clicks'),
     State("collapse_tune", "is_open"),
 )
-def open_selected_future_farms(n, is_open):
+def open_tuning_collapse(n, is_open):
     logger.debug('Collapsing tuning')
     if n:
         return not is_open
@@ -810,16 +812,15 @@ def open_selected_future_farms(n, is_open):
 
 
 @app.callback(
-    Output("tab2_store",'data'),
-    # Output('all_tabs', 'active_tab'),
-#    Input('inspect-area', 'n_clicks'),    
+    Output("tab2_store",'data'),  
     Input('selection_store','data'),
     Input('view_store','data'),
     Input('bubbles','data'),
     State('planned_store', 'data')
-#    State('inspect-area', 'children'),
     )
 def compute_selection_stats(selection,view, bubble_data, plan):
+    if selection is None or bubble_data is None:
+        raise PreventUpdate 
     selection=json.loads(selection)
     dataset=json.loads(bubble_data) 
     tab2={'counts':{},
@@ -843,23 +844,48 @@ def compute_selection_stats(selection,view, bubble_data, plan):
             stack_planned=cropped_planned.to_stacked_array('v', ['y', 'x']).sum(dim='v').compute()*dataset['lice/egg factor']
         else:
             stack_planned=DataArray()
-        for arr,name in zip([stack_current, stack_planned], ['Active farms', 'Planned farms']):
-            tab2['counts'][name], tab2['max'][name], tab2['mean'][name], tab2['stdv'][name]=arr.count().item(), arr.max().item(), arr.mean().item(), arr.std().item()
-        tab2['max']['All'], tab2['mean']['All'], tab2['stdv']['All']= max([tab2['max']['Active farms'], \
-                            tab2['max']['Planned farms']]), \
-                            sum([tab2['mean']['Active farms'], tab2['mean']['Planned farms']])/2, \
-                            sum([tab2['stdv']['Active farms'], tab2['stdv']['Planned farms']])/2
-        logger.debug(tab2)
-    ### statistics counts of cells with values, max concentrations, average, stdv    
-        for ds in [cropped_current, cropped_planned]:
-            for farm in ds.keys():
+
+    ### statistics counts of cells with values, max concentrations, average, stdv  
+        dslist=  [cropped_current, cropped_planned]
+        subt=['Active farms', 'Planned farms']
+        Nb=[]
+        tab2['mean']['All']=0
+        tab2['counts']['All'] =np.nan #Unknown overlap
+        tab2['stdv']['All'] =np.nan
+        tab2['max']['All']=0
+        #init for order of list...
+        for d in range(2):
+            tab2['counts'][subt[d]]=0
+            tab2['mean'][subt[d]]=0
+            tab2['max'][subt[d]]=0
+            tab2['stdv'][subt[d]]=0
+        for d in range(2): 
+            Nb.append(len(dslist[d].keys()))          
+            for farm in dslist[d].keys():                            
                 if farm in plan['checklist']:
                     den=dataset['lice/egg factor']
                 else:
                     den=1
-                arr= ds[farm].compute()
+                arr= dslist[d][farm].compute()
                 if arr.count().item()>0:
-                    tab2['counts'][farm], tab2['max'][farm], tab2['mean'][farm], tab2['stdv'][farm]=arr.count().item(), arr.max().item()*den, arr.mean().item()*den, arr.std().item()*den
+                    tab2['counts'][farm], tab2['max'][farm], tab2['mean'][farm], tab2['stdv'][farm]=arr.count().item(), arr.max().item()*den, arr.sum().item()*den, arr.std().item()*den
+                    tab2['counts'][subt[d]]+=tab2['counts'][farm]
+                    tab2['max'][subt[d]]=max(tab2['max'][subt[d]], tab2['max'][farm])
+                    tab2['mean'][subt[d]]+=tab2['mean'][farm]
+                    #tab2['stdv'][subt[d]]+=tab2['stdv'][farm]
+                    tab2['mean']['All']+=tab2['mean'][farm]
+                    #tab2['stdv']['All']+=tab2['stdv'][farm]
+                    tab2['mean'][farm]/=tab2['counts'][farm] #only calculate now
+            if tab2['counts'][subt[d]] >0:
+                tab2['mean'][subt[d]] /=tab2['counts'][subt[d]]
+            else:
+                tab2['mean'][subt[d]] = np.nan
+            tab2['stdv'][subt[d]] =np.nan
+                
+    tab2['max']['All']=max(tab2['max'][subt[0]], tab2['max'][subt[0]])
+    tab2['mean']['All']/=(tab2['counts'][subt[0]]+tab2['counts'][subt[1]])
+      
+    logger.debug(tab2)
     logger.debug('tab2 data stored')
     return json.dumps(tab2, cls= JsonEncoder)
 
@@ -868,6 +894,8 @@ def compute_selection_stats(selection,view, bubble_data, plan):
     Output('maxis','figure'),
     Output('means','figure'),
     Output('standev','figure'),## all the graphs
+    Output('datatable','data'),
+    #Output('datatable','columns'),
     Input("tab2_store",'data'),
     State('counts','figure'),
     State('maxis','figure'),
@@ -886,7 +914,28 @@ def draw_statistics(tab2, fig1,fig2,fig3,fig4):
             fig['data'][0]['y']=list(stats[val].values())
         #logger.debug(fig['data'][0]['x'])
         fig1['data'][0]['y']=[float(x)*stats['resolution']**2/1000000 for x in fig1['data'][0]['y']]
-        return fig1, fig2, fig3, fig4
+        # compute tab
+        data=[]
+        #columns=[] #list(stats.keys())
+        var0=None
+        for var in stats.keys():
+            if var != 'resolution':
+                if var0 is None:
+                    # init the list
+                    var0=var
+                    Newlist=list(stats[var].keys())
+                    for n in range(len(Newlist)):
+                        data.append({'name':Newlist[n]})
+                       
+                for n in range(len(Newlist)):
+                    data[n][var]=stats[var][Newlist[n]]
+                #data.append(stats[var])
+                #columns.append(var)
+        #logger.debug('columns:')
+        #logger.debug(columns)
+        logger.debug('data:')
+        logger.debug(data)
+        return fig1, fig2, fig3, fig4, data#, columns
     
 if __name__ == '__main__':
     app.run_server(host='0.0.0.0', port=8050, debug=True)
