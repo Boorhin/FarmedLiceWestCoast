@@ -39,7 +39,7 @@ from dash.dependencies import Input, Output, State, MATCH, ALL
 # from dash_extensions.enrich import Output, Input, html, State, MATCH, ALL, DashProxy, LogTransform, DashLogger, dcc # FileSystemStore #ServersideOutput, ServersideOutputTransform, 
 import dash_bootstrap_components as dbc
 from dash_bootstrap_templates import ThemeSwitchAIO, load_figure_template
-import dash_mantine_components as dmc
+#import dash_mantine_components as dmc
 
 import dash_daq as daq
 
@@ -853,6 +853,7 @@ def compute_selection_stats(selection,view, bubble_data, plan):
         tab2['counts']['All'] =np.nan #Unknown overlap
         tab2['stdv']['All'] =np.nan
         tab2['max']['All']=0
+        
         #init for order of list...
         for d in range(2):
             tab2['counts'][subt[d]]=0
@@ -866,9 +867,13 @@ def compute_selection_stats(selection,view, bubble_data, plan):
                     den=dataset['lice/egg factor']
                 else:
                     den=1
+                factor=den*1000000/(tab2['resolution']**2)
                 arr= dslist[d][farm].compute()
                 if arr.count().item()>0:
-                    tab2['counts'][farm], tab2['max'][farm], tab2['mean'][farm], tab2['stdv'][farm]=arr.count().item(), arr.max().item()*den, arr.sum().item()*den, arr.std().item()*den
+                    tab2['counts'][farm], tab2['max'][farm], tab2['mean'][farm], tab2['stdv'][farm]=arr.count().item(), \
+                        arr.max().item()*factor, \
+                        arr.sum().item()*factor, \
+                        arr.std().item()*factor
                     tab2['counts'][subt[d]]+=tab2['counts'][farm]
                     tab2['max'][subt[d]]=max(tab2['max'][subt[d]], tab2['max'][farm])
                     tab2['mean'][subt[d]]+=tab2['mean'][farm]
