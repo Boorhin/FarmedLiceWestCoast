@@ -7,15 +7,15 @@ pyproj==3.4.0
 datashader==0.14.2
 plotly==5.15.0
 colorcet==3.0.0
-dash==2.8.1
+dash==2.16.0
 dash_bootstrap_templates==1.0.7
 dash_bootstrap_components==1.2.1
 dash_extensions==0.1.11
-dash-mantine-components==0.11.1
+# dash-mantine-components==0.11.1
 flask_caching==2.0.1
 dash_daq==0.5.0
-gunicorn==20.1.0
+gunicorn==22.0.0
 boto3
-redis==4.4.2
-orjson==3.8.5
+redis==5.0.2
+orjson>=3.9.15
 celery==5.2.7
