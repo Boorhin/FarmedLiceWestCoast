@@ -212,6 +212,22 @@ def walk(directory):
     for (root,dirs,files) in os.walk(directory):
         paths[root]=[dirs, files]
     return paths
+    
+def Mktab(stats):
+   data=[]
+   var0=None
+   for var in stats.keys():
+        if var != 'resolution':
+            if var0 is None:
+                # init the list
+                var0=var
+                Newlist=list(stats[var].keys())
+                for n in range(len(Newlist)):
+                    data.append({'name':Newlist[n]})
+                       
+            for n in range(len(Newlist)):
+                data[n][var]=stats[var][Newlist[n]]
+   return data
 
 ############# VARIABLES ##########################33
  # value extent
@@ -913,34 +929,43 @@ def draw_statistics(tab2, fig1,fig2,fig3,fig4):
     else:
         logger.info('Drawing area statistics')
         stats=json.loads(tab2)
-        # logger.debug(f'tab2_{tab2}')
         for val,fig in zip(['counts','max','mean','stdv'],[fig1,fig2,fig3,fig4]):
             fig['data'][0]['x']=list(stats[val].keys())
             fig['data'][0]['y']=list(stats[val].values())
-        #logger.debug(fig['data'][0]['x'])
+        #logger.debug(fig['data'][0]['x'])       
         fig1['data'][0]['y']=[float(x)*stats['resolution']**2/1000000 for x in fig1['data'][0]['y']]
-        # compute tab
-        data=[]
-        #columns=[] #list(stats.keys())
-        var0=None
-        for var in stats.keys():
-            if var != 'resolution':
-                if var0 is None:
-                    # init the list
-                    var0=var
-                    Newlist=list(stats[var].keys())
-                    for n in range(len(Newlist)):
-                        data.append({'name':Newlist[n]})
-                       
-                for n in range(len(Newlist)):
-                    data[n][var]=stats[var][Newlist[n]]
+
                 #data.append(stats[var])
                 #columns.append(var)
         #logger.debug('columns:')
         #logger.debug(columns)
+        data=Mktab(stats)
         logger.debug('data:')
         logger.debug(data)
         return fig1, fig2, fig3, fig4, data#, columns
+
+@app.callback(
+    Output("download-csv", "data"),
+    Input("btn-download-csv", "n_clicks"),
+    Input("tab2_store",'data'),
+    prevent_initial_call=True,
+)
+def make_csv(n_clicks,tab2):
+    if tab2 is None:
+        raise PreventUpdate
+    else:
+        stats=json.loads(tab2)
+        data=Mktab(stats)
+        logger.debug(data)
+        tab='name,area,max,mean,stdv\n(units),(km²),(Copepodid),(Copepodid),(Copepodid)\n'
+        for i in range(len(data)):
+           l=list(data[i].values())
+           if l[1] != 'nan':
+               l[1]=float(l[1])*(stats['resolution']**2)/1000000
+           l=[str(x) for x in l]
+           logger.debug(l)
+           tab+=','.join(l)+'\n'
+        return dict(content=tab, filename="SelectedAreaStats.csv")
     
 if __name__ == '__main__':
     app.run_server(host='0.0.0.0', port=8050, debug=True)
