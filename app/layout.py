@@ -545,8 +545,12 @@ def tab2_layout():
                 id='datatable',
                 data=[],
                 columns= columns           
-            )
-        ])
+                )
+            ]),
+        dbc.Row([
+            html.Button("Download csv", id="btn-download-csv"),
+            dcc.Download(id="download-csv")
+            ]),
     ])
     return layout
 
