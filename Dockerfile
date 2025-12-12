@@ -1,6 +1,6 @@
-FROM python:3.10
+FROM python:3.12.3
 
-LABEL maintainer "Dr Julien Moreau, moreau.juli1@gmail.com"
+LABEL maintainer="Dr Julien Moreau, moreau.juli1@gmail.com"
 
 WORKDIR /usr/src/FarmedLiceWestCoast
 
@@ -15,11 +15,15 @@ RUN date "+%Y-%m-%dT%H:%M">assets/build-date.txt
 
 EXPOSE 8050
 
-# Changing to non-root user
-RUN useradd -m appUser
-USER appUser
+# Changing to non-root user K8
+#RUN useradd -m appUser
+#USER appUser
 
-# Run locally on port 8080
-CMD gunicorn --workers=4 --bind 0.0.0.0:8050 main:server
+# Changing to non-root user Ubuntu22
+RUN useradd -m azimuth
+USER azimuth
+
+# Run locally on port 8050
+CMD ["gunicorn", "--workers=4","--bind", "0.0.0.0:8050", "main:server"]
 
 

@@ -4,7 +4,7 @@ import dash
 from dash import dcc as dcc
 
 import dash_bootstrap_components as dbc
-from dash_extensions.enrich import Output, Input, html, State, MATCH, ALL, DashProxy, LogTransform, DashLogger
+from dash_extensions.enrich import Output, Input, html, State, MATCH, ALL, DashProxy#,  DashLogger #LogTransform,
 import dash_daq as daq
 import logging, random
 import numpy as np
@@ -383,6 +383,7 @@ def tab1_layout():
                     dcc.Graph(
                         id='heatmap',
                         figure=init_the_figure(),
+                        config={'scrollZoom': True},
                         #mathjax=True,
                         ),
                     dcc.Loading(
@@ -720,7 +721,7 @@ Once the model has been run, the number of copepodid in each particle through th
   * You can change the egg production model, meaning the number of nauplii produced per hour by each louse. Most modellers use the work of Stien et al. (2005) but Rittenhouse et al. (2016) is an alternative one you can test too.
   * You can add the contribution to the density maps of planned farms based on their declared max biomass and a standard lice density of 0.5 (except if you modify the global infestation levels).
   * You can change the resolution of the map you display. The map resolution varies as a function of the viewport from 800m to 50m. To limit the resource used, only the area visible in the map viewport is rendered. To visualise another area, you will have to press the **Render density map** again. When you browse the map, notifications will indicate the resolution you would have if you compute the map.
-  * You can generate density maps with the button **Render density map** this will take into account the parameters aforementioned. If you change, the year, the global biomass, the global lice infestation, the wiewport or try to use reported biomass you will need to refresh the map to see the updated parameters.
+  * You can generate density maps with the button **Render density map** this will take into account the parameters aforementioned. If you change, the year, the global biomass, the global lice infestation, the viewport or try to use reported biomass you will need to refresh the map to see the updated parameters.
   * You can save a screenshot of the map with the button appearing in the upper-right of the map **Download plot as png**.
   ![Make a screenshot](assets/screenshoting.png)
   

@@ -29,8 +29,8 @@ from plotly.subplots import make_subplots
 from colorcet import fire, bmy
 from datashader import transfer_functions as tf
 from datetime import datetime, timedelta
-from os import path, environ, walk
-import dash
+
+import dash, os
 from dash import dcc as dcc
 from dash.exceptions import PreventUpdate
 from dash import html as html
@@ -264,10 +264,10 @@ p=Proj("epsg:3857", preserve_units=False)
 
 ##################### FETCH DATA ###################
 # test local vs host
-if path.exists('/home/appUser'):
+if os.path.exists('/home/appUser'):
     rootdir='/home/appUser/data/'
     paths={}
-elif path.exists('/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'):
+elif os.path.exists('/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'):
     rootdir='/media/julien/NuDrive/Consulting/The NW-Edge/Oceano/Westcoast/super_app/data/'
     paths={}
 else:
@@ -303,7 +303,7 @@ dbc_css = (
 
 # Cache config
 cacheconfig={'CACHE_TYPE': 'RedisCache',
-             'CACHE_REDIS_HOST': environ['REDIS_URL']
+#             'CACHE_REDIS_HOST': environ['REDIS_URL']
     }
 #celery_app = Celery(__name__, broker=environ['REDIS_URL'], backend=environ['REDIS_URL'])
 #background_callback_manager = dash.CeleryManager(celery_app)
@@ -325,12 +325,12 @@ def warmup():
     """Warm up an instance of the app."""
     #test redis connection
     from redis import Redis
-    r = Redis(environ['REDIS_URL'], socket_connect_timeout=1)
+    r = Redis(os.environ['REDIS_URL'], socket_connect_timeout=1)
     try:
         r.ping() 
-        print('connected to redis "{}"'.format(environ['REDIS_URL'])) 
+        print('connected to redis "{}"'.format(os.environ['REDIS_URL'])) 
     except:
-        print(f"connection failed to {environ['REDIS_URL']}")
+        print(f"connection failed to {os.environ['REDIS_URL']}")
     return "it is warm"
     # Handle your warmup logic here, e.g. set up a database connection pool
 
@@ -968,4 +968,4 @@ def make_csv(n_clicks,tab2):
         return dict(content=tab, filename="SelectedAreaStats.csv")
     
 if __name__ == '__main__':
-    app.run_server(host='0.0.0.0', port=8050, debug=True)
+    app.run(host='0.0.0.0', port=8050, debug=True)
